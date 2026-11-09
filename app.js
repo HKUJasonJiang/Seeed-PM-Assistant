@@ -4,7 +4,11 @@
   const publicPreview=Boolean(document.querySelector('meta[name="seeed-public-preview"]'));
   const loopback=['127.0.0.1','localhost','[::1]'].includes(location.hostname);
   let base=window.SEEED_CATALOG;
-  if(!base){view.textContent='产品目录未载入。请使用「全部解压」，确认 data 文件夹与 index.html 位于同一目录。 The catalogue could not be loaded. Extract the whole ZIP and keep the data folder next to index.html.';return;}
+  const missingFiles=[];
+  if(!Array.isArray(base?.products)||!base.products.length)missingFiles.push('data/catalog.js');
+  if(typeof createSearch!=='function')missingFiles.push('search.js');
+  if(typeof mergeProductData!=='function')missingFiles.push('product-ui.js');
+  if(missingFiles.length){view.textContent='未能读取所需文件 / Could not load: '+missingFiles.join(', ');return;}
   let db=base, search, currentProduct, currentAlternatives=[];
   let profile={language:'zh-CN',provider:'deepseek',providers:{},favorites:[],projects:[],overrides:{}};
   let lang='zh-CN', connected=false;
@@ -64,7 +68,7 @@
     const docs='https://github.com/HKUJasonJiang/Seeed-PM-Assistant/blob/main/'+(lang==='en'?'README.md':'README.zh-CN.md');
     return `<section class="preview-guide" aria-labelledby="preview-heading"><div class="preview-guide-body"><h2 id="preview-heading">${t('当前是只读目录预览','You’re viewing the read-only catalogue')}</h2>`+
       `<p>${t('在这里可以查产品。收藏、定制项目、AI 对话和开发者设置在完整工作台中。','You can look up products here. Favorites, customization projects, AI chat and Developer settings are in the full workbench.')}</p>`+
-      `<p>${t('首次使用，请将下载的 ZIP「全部解压」，回到含有 index.html 的文件夹，双击','For first use, extract the entire ZIP. In the folder containing index.html, double-click')} <strong>${t('启动助手.cmd','Start Assistant.cmd')}</strong>${t('，使用启动器打开的浏览器页面。',' and use the browser page opened by the launcher.')}</p></div>`+
+      `<p>${t('首次使用完整工作台，请安装 64 位 Python 3.12 或 3.13，将 ZIP「全部解压」，再双击','For the full workbench, install 64-bit Python 3.12 or 3.13, extract the entire ZIP, then double-click')} <strong>${t('启动助手.cmd','Start Assistant.cmd')}</strong>${t('。如果启动器提示找不到 Python，请按安装说明操作；现在也可以直接在下方查商品。',' in the extracted folder. If the launcher cannot find Python, follow the setup guide. You can already search for products below.')}</p></div>`+
       `<div class="preview-guide-actions"><a class="workbench-link" href="${h(workspaceLink())}">${t('打开已启动的工作台','Open a running workbench')} ↗</a><small>${t('默认端口 8765；其他端口以启动器为准。','Default port 8765. Use the launcher’s address if it differs.')}</small><div>${link(docs,t('安装说明','Setup guide'))} · <a href="?lang=${locale}${h(location.hash)}" lang="${locale}">${lang==='en'?'简体中文':'English'}</a></div></div></section>`;
   }
   function shell(){
@@ -637,7 +641,7 @@
     if(connected)window.WorkbenchChat.init({root:el('global-ai'),api,language:()=>lang,connected:()=>connected,profile:()=>({provider:profile.provider,providers:profile.providers}),
       getContext:chatContext,getContextLabel:chatContextLabel,openSettings:()=>window.Workbench?.openSettings(),
       openEvidence:openChatEvidence,openProject:id=>window.Workbench?.openProject(id),openProduct});
-    window.addEventListener('hashchange',route);route();
+    window.addEventListener('hashchange',route);route();el('startup-help').hidden=true;
   }
-  start();
+  start().catch(()=>{view.textContent='目录未能打开，请按上方说明重新解压并刷新。 / The catalogue could not open. Extract the full ZIP and refresh.';});
 })();

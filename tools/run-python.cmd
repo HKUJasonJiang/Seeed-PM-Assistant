@@ -15,10 +15,26 @@ py -3 -I -B -c "%seeed_check%" >nul 2>nul
 if not errorlevel 1 goto py3
 :pathpython
 where python >nul 2>nul
-if errorlevel 1 goto missing
+if errorlevel 1 goto installed
 python -I -B -c "%seeed_check%" >nul 2>nul
-if errorlevel 1 goto missing
+if errorlevel 1 goto installed
 python -I -B %*
+exit /b %errorlevel%
+:installed
+for %%v in (313 312) do (
+    for %%d in ("%LOCALAPPDATA%\Programs\Python\Python%%v" "%LOCALAPPDATA%\Programs\Python\Python%%v-64" "%ProgramFiles%\Python%%v") do (
+        if exist "%%~d\python.exe" (
+            "%%~d\python.exe" -I -B -c "%seeed_check%" >nul 2>nul
+            if not errorlevel 1 (
+                set "seeed_python=%%~d\python.exe"
+                goto installedpython
+            )
+        )
+    )
+)
+goto missing
+:installedpython
+"%seeed_python%" -I -B %*
 exit /b %errorlevel%
 :private
 ".venv\Scripts\python.exe" -I -B %*
@@ -33,6 +49,9 @@ exit /b %errorlevel%
 py -3 -I -B %*
 exit /b %errorlevel%
 :missing
-echo Install 64-bit Python 3.12 or 3.13 from https://www.python.org/downloads/windows/
-echo In the installer enable "Add python.exe to PATH", then reopen this launcher.
+set "seeed_previous_cp="
+for /f "tokens=2 delims=:" %%p in ('chcp 2^>nul') do set "seeed_previous_cp=%%p"
+chcp 65001 >nul 2>nul
+type "%~dp0python-help.txt"
+if defined seeed_previous_cp chcp %seeed_previous_cp% >nul 2>nul
 exit /b 1

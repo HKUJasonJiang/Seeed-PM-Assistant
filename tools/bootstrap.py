@@ -67,6 +67,7 @@ def main():
                 if not verify():raise RuntimeError("Python could not import the installed packages. Check your Python installation and try again.")
         return subprocess.run([str(VENV_PYTHON),"-I","-B",str(ROOT/"tools"/"launch.py"),*sys.argv[1:]],cwd=ROOT).returncode
     except (subprocess.CalledProcessError,OSError,RuntimeError) as exc:
+        print("启动准备未完成。请确认已全部解压到可写文件夹，并请 IT 检查 Python 及依赖下载权限。修复后重新双击启动助手，或先打开 index.html 只读查商品。",file=sys.stderr)
         print("Setup could not finish. Check write access to this folder, Python 3.12/3.13, and access to your approved package source.",file=sys.stderr)
         if isinstance(exc,RuntimeError):print(str(exc),file=sys.stderr)
         return 1

@@ -10,11 +10,20 @@
   <link rel="stylesheet" href="chat.css">
 </head>
 <body>
-  <header><div class="bar"><a class="brand" href="#assistant" aria-label="Seeed Studio"><b>seeed</b><strong>studio</strong></a><span class="vline"></span><span class="app-name">产品选型助手</span><span class="mode"><i></i><span id="mode-name">载入中 · Loading</span></span></div></header>
+  <header><div class="bar"><a class="brand" href="#assistant" aria-label="Seeed Studio"><b>seeed</b><strong>studio</strong></a><span class="vline"></span><span class="app-name">产品选型助手</span><span class="mode"><i></i><span id="mode-name">产品目录 · Catalogue</span></span></div></header>
   <div class="shell"><aside>
     <nav id="nav" aria-label="工作区"></nav><div id="sidebar-favorites"></div>
     <div class="aside-foot"><button data-view="developer" id="developer-link"></button><a href="https://www.seeedstudio.com/" target="_blank" rel="noopener" id="store-link">Seeed Studio 海外商城 ↗</a></div>
-  </aside><main><div id="service-status"><p class="service-note">正在载入产品目录。完整工作台请在解压后的文件夹中双击 <strong>启动助手.cmd</strong>。<br>Loading the catalogue. To start the full workbench, double-click <strong>Start Assistant.cmd</strong> in the extracted folder.</p></div><section id="view"></section><noscript>请启用 JavaScript。Enable JavaScript to use this workspace.</noscript></main></div>
+  </aside><main>
+    <div id="startup-help" class="service-note">
+      <strong>没有看到商品？ / No products showing?</strong>
+      <p>下载完整 ZIP，在文件资源管理器中右键选择「全部解压」，再双击解压文件夹中的 <b>index.html</b> 查商品，无需安装 Python。收藏和定制项目请使用同一文件夹中的 <b>启动助手.cmd</b>。</p>
+      <p lang="en">Download the full ZIP, right-click it in File Explorer, choose <b>Extract All</b>, then open <b>index.html</b> from the extracted folder. Browsing products requires no Python. For Favorites and projects, use <b>Start Assistant.cmd</b> in the same folder.</p>
+      <a href="https://github.com/HKUJasonJiang/Seeed-PM-Assistant/archive/refs/heads/main.zip">下载完整 ZIP / Download the full ZIP</a>
+      <noscript><p>请在浏览器中启用 JavaScript 后刷新。 / Enable JavaScript in your browser and refresh.</p></noscript>
+    </div>
+    <div id="service-status"></div><section id="view"></section>
+  </main></div>
   <div id="global-ai"></div>
   <script src="data/catalog.js"></script><script src="search.js"></script><script src="product-ui.js"></script><script src="workbench.js"></script><script src="chat.js"></script><script src="app.js"></script>
 </body>

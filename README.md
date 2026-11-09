@@ -4,6 +4,8 @@
 
 A local Windows workbench for Seeed project managers. Start with a customer’s SKU, model or application requirement. Compare products from the **international Seeed Studio store**, check what ships in the box, find regional accessory SKUs and collect customization requests. The included catalogue works without an AI key.
 
+**Sharing the catalogue with a colleague?** Send the full ZIP download link. On their Windows PC, they can download the ZIP, right-click **Extract All**, and open **`index.html`** beside the extracted `data` folder. No Python is needed to see J4012 on the first screen or search `100025879` for R1014-10. A GitHub address containing `/blob/` shows source code. `127.0.0.1` points to the recipient’s own PC and works after they start their local workbench. [Download the full ZIP](https://github.com/HKUJasonJiang/Seeed-PM-Assistant/archive/refs/heads/main.zip)
+
 **Looking for Favorites?** If the browser address starts with `file:///` and ends in `index.html`, you opened the read-only catalogue. To use the full workbench, extract the whole ZIP, return to the folder containing `index.html`, and double-click **`Start Assistant.cmd`** (or `启动助手.cmd`). Follow the setup steps below on a new PC. Use the browser address opened by that launcher. The full workbench shows **Favorites** and **Customization** on the left, **Developer** at the bottom left and the **AI chat** button at the bottom right. If the service is already running on the default port, you can go straight to your favorites. [Open Favorites on this PC](http://127.0.0.1:8765/#favorites)
 
 ## First-time setup on Windows
@@ -108,7 +110,9 @@ Maintainers with a signed-in GitHub CLI can optionally pass `--host api.github.c
 
 | Symptom | What to do |
 | --- | --- |
-| Python missing, package download fails or Windows blocks the launcher | Make sure you extracted all files. Check Python as in step 1. Give IT the exact launcher message and ask them to verify the Python installation, package access or device policy. Omit customer data and keys from screenshots. |
+| The console displays `Install 64-bit Python 3.12 or 3.13`, then closes on a keypress | The launcher could not find a supported Python. Follow step 1 or ask IT to check the version and architecture. Close the old window, then double-click `Start Assistant.cmd` again. For a custom installation path, ask IT to add it to PATH. You can open `index.html` to browse products in the meantime. |
+| Opening the HTML shows only a heading or never gets past “Loading” | A standalone HTML file is missing the catalogue and scripts. Right-click the full ZIP → **Extract All**, then use Edge or Chrome to open `index.html` alongside `data` and `search.js` in the extracted folder. If the browser says JavaScript is disabled, contact IT. |
+| Package downloads fail, the directory is unwritable or a company policy blocks startup | Extract the full package into a writable local folder. Give IT the exact launcher message and ask them to verify package access or device policy. Omit customer data and keys from screenshots. |
 | The browser does not open, the port is occupied, or the wrong copy appears | If the launcher says it is ready, open the local address it reports. For a previous installation, run **its own** `Stop Assistant.cmd`, then start the intended copy. If a port error persists, contact IT. |
 | Favorites or projects seem to be missing | Confirm the browser address uses the local port your launcher opened, and that you launched the same extracted folder under the same Windows account. Personal data lives with that installation. |
 | An AI answer or product detail is unavailable | Check the selected provider, model and key. For the product, use its store URL and source links, inspect the coverage status, or request a scoped refresh. |

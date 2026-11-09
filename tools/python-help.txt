@@ -1,0 +1,7 @@
+未找到可用的 64 位 Python 3.12 或 3.13，完整工作台尚未启动。
+请让公司 IT 安装，或到下方官网下载并运行 Windows installer (64-bit)，勾选 Add python.exe to PATH。
+安装后关闭此窗口，重新双击「启动助手.cmd」。现在也可双击解压目录里的 index.html 只读查询商品。
+
+Install 64-bit Python 3.12 or 3.13 from https://www.python.org/downloads/windows/
+In the installer enable "Add python.exe to PATH", then reopen Start Assistant.cmd.
+To look up products immediately, open index.html in the fully extracted folder.
