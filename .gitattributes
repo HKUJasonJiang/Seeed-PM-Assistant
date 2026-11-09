@@ -1,0 +1,11 @@
+* text=auto
+*.cmd text eol=crlf
+*.py text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.jpg binary
+# The updater identifies a catalogue snapshot by a digest of its exact bytes.
+/data/catalog.js -text -diff
