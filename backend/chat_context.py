@@ -6,7 +6,7 @@ from .storage import Problem, field
 
 
 VIEWS={"assistant","catalog","favorites","custom","coverage","developer"}
-TABS={"attributes","parts","accessories","notes","docs","raw","overview","settings","api","provider","providers","ai","products","product","editor","edit","updates","update","sync","language","projects","project","eligible","models","keys","credentials"}
+TABS={"attributes","specs","parts","accessories","notes","docs","raw","overview","settings","api","provider","providers","ai","products","product","editor","edit","updates","update","sync","language","projects","project","eligible","models","keys","credentials"}
 
 
 def redact(text, secrets=()):
@@ -79,7 +79,7 @@ def product_sources(store,sku,lang,query,tab,secrets,include_local=True):
     hints=set(re.findall(r"[a-z0-9_-]{3,}",query.lower()))
     for pattern,words in ((r"配件|扩展","accessorySKU accessory"),(r"标配|随箱|包含|清单","inBox quantity"),(r"定制","custom"),(r"价格|报价","listedPrice"),(r"参数|规格","storeAttribute storeTitleField")):
         if re.search(pattern,query):hints.update(words.lower().split())
-    hints.update({"parts":["inbox"],"accessories":["accessorysku"],"attributes":["storeattribute","storetitlefield"],"notes":["custom"]}.get(tab,[]))
+    hints.update({"parts":["inbox"],"accessories":["accessorysku"],"attributes":["storeattribute","storetitlefield","documentedmodelfield"],"specs":["storespecification"],"notes":["custom"]}.get(tab,[]))
     def rank(entry):return sum(h in entry.lower() for h in hints)
     for s in sources:
         s["facts"]=sorted(s["facts"],key=rank,reverse=True)[:9]

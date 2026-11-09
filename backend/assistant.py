@@ -19,7 +19,9 @@ def official(url):
         p=urlsplit(url)
         if p.scheme not in ("http","https") or not p.hostname or p.username or p.password or p.port not in (None,443):
             return ""
-        if p.hostname not in {"wiki.seeedstudio.com","www.seeedstudio.com","files.seeedstudio.com","seeedstudio.com"}:
+        official_wiki_source=p.hostname=="github.com" and re.match(r"^/Seeed-Studio/wiki-documents/blob/[0-9a-f]{40}/sites/en/docs/",p.path,re.I)
+        official_bucket=p.hostname=="s3-us-west-2.amazonaws.com" and re.match(r"^/files\.seeedstudio\.com/products/[A-Za-z0-9_-]+/",p.path) and ".." not in p.path
+        if not (official_wiki_source or official_bucket) and p.hostname not in {"wiki.seeedstudio.com","www.seeedstudio.com","files.seeedstudio.com","statics3.seeedstudio.com","sensecap-docs.seeed.cc","seeedstudio.com"}:
             return ""
         return urlunsplit(("https",p.netloc,p.path,p.query,p.fragment))
     except ValueError:
@@ -41,26 +43,66 @@ def evidence(catalog, rows, language):
             add(item.get("url"),item.get("title") or name,item.get(language) or item.get("en"))
         add(product.get("url"),name,{"sku":sku,"name":name,"summary":product.get("summary","")[:350]})
         add(product.get("url"),name,product.get("capabilities"))
+        if product.get("storeLifecycle"):
+            add(product.get("lifecycleSource") or product.get("url"),name,{"storeLifecycle":product["storeLifecycle"]})
         for item in product.get("attributes",[])[:30]:
             if item.get("name") and item.get("value"):
                 add(item.get("source") or product.get("attributeSource") or product.get("url"), name,
                     {"storeAttribute":item["name"],"value":item["value"]})
         for item in product.get("modelSpecs",[]):
-            add(item.get("source") or product.get("url"),name,{"storeTitleField":item["name"],"value":item["value"]})
+            source=item.get("source") or product.get("url") or ""
+            key="documentedModelField" if ".pdf" in source.lower() else "storeTitleField"
+            add(source,name,{key:item["name"],"value":item["value"]})
+        for table in product.get("specTables",[])[:4]:
+            spec_rows=table.get("rows",[])
+            # Only pass simple label/value matrices. Shared variant columns need the original headers.
+            if not spec_rows or any(len(row)!=2 or any(not isinstance(cell,str) for cell in row) for row in spec_rows[1:]):
+                continue
+            heads=[(cell if isinstance(cell,str) else cell.get("text","")).strip().lower() for cell in spec_rows[0]]
+            if len(heads)!=2 or heads[0] not in {"item","feature","parameter","specification","category","aspect","specifications"} or heads[1] not in {"value","details","description","specification","specifications","parameter","spec"}:continue
+            for label,value in spec_rows[1:14]:
+                if label and value:add(product.get("specSource"),name,{"storeSpecification":label,"value":value,"section":table.get("title","")})
+        for row in product.get("verifiedDocumentRows",[])[:30]:
+            add(row.get("source"),name,{k:row[k] for k in ("kind","name","sku","publishedSku","quantity","scope") if row.get(k)})
         for item,qty in product.get("parts",[])[:25]:
             source=product.get("partSources",{}).get(item) or product.get("partSource") or product.get("url")
-            add(source,name,{"inBox":item,"quantity":qty,"scope":product.get("partScopes",{}).get(item,"SKU")})
+            count_source=product.get("partQuantitySources",{}).get(item) or source
+            add(count_source,name,{"inBox":item,"quantity":qty,"scope":product.get("partScopes",{}).get(item,"SKU")})
+            if source!=count_source:add(source,name,{"inBox":item})
+            description=product.get("partDescriptions",{}).get(item,{})
+            if description.get("kind")=="crossListed":
+                add(description.get("source") or source,name,{"inBoxItem":item,"crossListed":description.get("groups"),"totalQuantityUnconfirmed":True})
+        for conflict in product.get("partConflicts",[])[:5]:
+            for source,qty in (("existingSource","existingQuantity"),("documentSource","documentQuantity")):
+                add(conflict.get(source),name,{"inBoxQuantityConflict":conflict.get("name"),"quantityInThisSource":conflict.get(qty),"requiresConfirmation":True})
+        for item,records in list(product.get("partQuantityConflicts",{}).items())[:5]:
+            for record in records[:4]:
+                add(record.get("source"),name,{"inBoxQuantityConflict":item,"quantityInThisSource":record.get("quantity"),"requiresConfirmation":True})
+        for conflict in product.get("documentConflicts",[])[:5]:
+            for source,field in (("source","name"),("catalogUrl","catalogName")):
+                add(conflict.get(source),name,{"conflictingField":conflict.get("field"),"affectedSku":conflict.get("publishedSku") or sku,"descriptionInThisSource":conflict.get(field),"requiresConfirmation":True})
         if product.get("price") and product.get("currency"):
-            add(product.get("url"),name,{"listedPrice":product["price"],"maximum":product.get("maxPrice"),"currency":product["currency"],"asOf":product.get("updated")})
+            price_key="archivedPriceNotConfirmed" if product.get("storePageStatus")=="not_found" else "listedPrice"
+            add(product.get("url"),name,{price_key:product["price"],"maximum":product.get("maxPrice"),"currency":product["currency"],"asOf":product.get("updated")})
+        if product.get("storePageStatus")=="not_found":
+            add(catalog.get("audit",{}).get("sources",{}).get("sitemap"),name,{"status":"Routing data exists; normal store page returned HTTP 404. Current availability and price require confirmation."})
+        identity=(product.get("detailAudit") or {}).get("identity") or {}
+        if product.get("detailAudit",{}).get("state")=="source_error" and identity.get("reason"):
+            add(identity.get("resolvedUrl") or product.get("url"),name,{"pageIdentityMismatch":identity["reason"],"displayedSkus":identity.get("displayedSkus",[]),"requestedSku":sku,"useLandingPageSpecifications":False})
         add(product.get("customUrl"),name,product.get("custom"))
         for note in product.get("notes",[])[:8]:
             add(note.get("source"),name,note.get("text"))
         for item in product.get("accessories",[])[:40]:
-            url=item.get("source")
+            url=item.get("documentedAsAccessorySource") or item.get("source")
             if item.get("doc") and item.get("page"):
                 base=catalog.get("docs",{}).get(item["doc"],{}).get("url")
                 if base: url=base+"#page="+str(item["page"])
-            add(url,name,{"accessorySKU":item.get("sku"),"name":item.get("name"),"item":item.get("type"),"note":item.get("note")})
+            offer=item.get("type")=="商品页 Also Add 加购项" and not item.get("documentedAsAccessorySource")
+            sku_key="storeOfferSkuCompatibilityUnconfirmed" if offer else "accessorySKU"
+            add(url,name,{sku_key:item.get("sku") or item.get("publishedSku"),"name":item.get("name"),"item":item.get("type"),"note":item.get("note")})
+            for condition in item.get("compatibilityDetails",[])[:3]:
+                kind="listedModuleSku" if item.get("type")=="Official module list" else "compatibleAccessorySku"
+                add(condition.get("source") or url,name,{kind:item.get("sku") or item.get("publishedSku"),**{k:condition[k] for k in ("interface","voltage","makeCode","sheet","row") if condition.get(k)}})
         for group in sources.values():
             group["id"]=len(result)+1
             result.append(group)

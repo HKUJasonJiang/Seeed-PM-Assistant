@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..');
 global.window={};
-require(path.join(root,'data/catalog.js'));
+require(process.env.SEEED_TEST_CATALOG||path.join(root,'data/catalog.js'));
 const db=window.SEEED_CATALOG;
 const search=require(path.join(root,'search.js'))(db);
 assert.equal(new Set(db.products.map(p=>p.sku)).size,db.stats.total);
@@ -58,4 +58,33 @@ assert.match(r1014.partSources['DIN-rail clip'],/wiki\.seeedstudio\.com\/.+#din-
 assert.equal(new Set(r1014.accessories.map(a=>a.sku)).size,25);
 assert(search.bySku.get('110110145').parts.some(([item,qty])=>/Power Adapter/i.test(item)&&/1/.test(qty)));
 for(const a of search.alternatives(r1014,'R1014-10 EU868',[]))assert.match(a.p.name,/^reComputer R10/);
+if(db.audit) {
+  const audit=db.audit, state=audit.detail;
+  assert.equal(state.all,state.nonempty+state.empty+state.source_error+state.excluded+state.unread);
+  assert.equal(state.checked,state.nonempty+state.empty);
+  for(const [key,counts] of Object.entries(audit.fields)) {
+    assert.equal(Object.values(counts).reduce((a,b)=>a+b,0),state.all,key);
+  }
+  const paired=['110990471','110060306'].map(sku=>search.bySku.get(sku));
+  assert.equal(paired[0].url,paired[1].url);
+  assert.notEqual(paired[0].storeId,paired[1].storeId);
+  assert.equal(search.bySku.get('102110773').storePageStatus,'not_found');
+  assert.equal(search.bySku.get('102110773').modelSpecs.find(x=>x.name==='RAM').value,'8GB');
+  assert(search.bySku.get('102110773').modelSpecs.every(x=>x.source.endsWith('#page=17')));
+  assert(search.bySku.get('206001697').specTables.some(t=>t.rows.length>=15));
+  assert(audit.images.verifiedSkus+audit.images.missingSourceSkus+audit.images.failedSkus===db.stats.total);
+  assert.equal(audit.documents.uniqueLinked,Object.values(audit.documents.uniqueByStatus).reduce((a,b)=>a+b,0));
+  for(const p of db.products){
+    const parts=new Set((p.parts||[]).map(([name])=>name));
+    for(const [name,sku] of Object.entries(p.partProductSkus||{})){
+      assert(parts.has(name),p.sku+' contains an unlisted linked component');
+      assert(search.bySku.has(String(sku).toLowerCase()),p.sku+' has a missing linked component '+sku);
+    }
+    for(const [name,loc] of Object.entries(p.partSourceLocations||{})){
+      assert(parts.has(name)&&loc.sheet&&loc.row>0,p.sku+' has an untraceable spreadsheet row');
+    }
+    const docs=p.documentAudit;
+    if(docs)assert.equal(docs.linked,docs.checked+docs.unread+docs.failed,p.sku+' document accounting');
+  }
+}
 console.log('Offline catalogue checks passed.',db.stats);

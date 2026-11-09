@@ -29,7 +29,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   ];
   const englishLabels={super:'Super mode',ether:'dual Ethernet',custom:'customization',gateway:'gateway',jetson:'Jetson edge inference',pi:'Raspberry Pi',fanless:'fanless',edge:'edge computing',din:'DIN rail',sensor:'sensors',temp:'temperature',camera:'camera',display:'display',micro:'development board',robot:'robotics'};
   if(en)for(const t of traits)t.label=englishLabels[t.key]||t.label;
-  const searchable=new Map(products.map(p=>[p.sku,lower([p.name,p.summary,...(p.capabilities||[]),...p.groups].join(' '))]));
+  const searchable=new Map(products.map(p=>[p.sku,lower([p.name,p.summary,...(p.capabilities||[]),...p.groups,...(p.attributes||[]).map(a=>a.name+' '+a.value),...(p.modelSpecs||[]).map(a=>a.name+' '+a.value)].join(' '))]));
   function negated(query, t) {
     const clause=query.split(/[，,。;；\n]/).find(c=>t.ask.test(c));
     if(!clause)return false;
@@ -103,7 +103,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   function lookup(query) {
     const q=lower(query.trim()), needs=intents(q), fixed=named(q);
     const ranked=products.map(p=>({p,score:score(p,q,needs)})).filter(x=>x.score>0)
-      .sort((a,b)=>b.score-a.score||Number(Boolean(b.p.series))-Number(Boolean(a.p.series))||a.p.name.localeCompare(b.p.name));
+      .sort((a,b)=>Number(a.p.storePageStatus==='not_found')-Number(b.p.storePageStatus==='not_found')||b.score-a.score||Number(Boolean(b.p.series))-Number(Boolean(a.p.series))||a.p.name.localeCompare(b.p.name));
     let selection='';
     if(fixed && !q.includes(fixed.sku.toLowerCase())){
       if(q.includes('r1100')&&!/r11[0-9][1-9]/.test(q))selection=pick('指定系列 · 展示 R1125-10 代表配置，请确认具体型号','Series match · R1125-10 shown as a representative configuration');
@@ -144,7 +144,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
       else if(!why){const tokens=common.slice(0,3).join(en?', ':'、');why=pick((same.length?'同属 '+same[0]+'。':'')+'名称中的共同特征：'+tokens+'。',(same.length?'Also listed in '+same[0]+'. ':'')+'Shared product terms: '+tokens+'.');}
       list.push({p,weight,why});
     }
-    return list.sort((a,b)=>b.weight-a.weight||a.p.name.localeCompare(b.p.name)).slice(0,3);
+    return list.sort((a,b)=>Number(a.p.storePageStatus==='not_found')-Number(b.p.storePageStatus==='not_found')||b.weight-a.weight||a.p.name.localeCompare(b.p.name)).slice(0,3);
   }
   return {lookup,alternatives,matches,bySku};
 }

@@ -27,11 +27,22 @@ To finish for the day, close the browser tab. To stop the local service, double-
 
 ### What the included catalogue covers
 
-The **8 November 2026** snapshot contains **4,499 unique SKUs** from the overseas public store. **1,776** map to the 15 menu categories checked. The remaining SKUs are still searchable. **4,494** have a positive starting price, **4,467** have a local main image, **2,829** have one or more recorded in-box items, and **959** have document links. Detailed product-page sections were captured on **395** SKUs. **Coverage** shows the counts for the version you are using.
+The **9 November 2026** review compared three public sources. The overseas product search returned **4,499 SKUs**, of which **1,776** appeared across 15 Products menu categories. The sitemap and store routing data identified another **22 SKUs**. All 22 returned HTTP 404 when their ordinary product URLs were checked. They remain searchable in the workbench as archived sitemap records. Confirm availability and pricing separately for these products. The combined catalogue has **4,521 distinct SKUs**.
+
+Open **Coverage** to see the review date, public sources and the number of product pages and documents checked, empty, unavailable or excluded. Product descriptions and the ten separate product-page sections have independent counts. The same page lists available fields across all reviews, verified local photos and the sitemap reconciliation. [Open local coverage](http://127.0.0.1:8765/#coverage) · [Official sitemap](https://www.seeedstudio.com/sitemap.xml)
+
+The **9 November 2026** review attempted all **4,479** eligible product-page entries. It verified the SKU and all ten sections for **4,436** entries. Of these, 4,370 had content and 66 had ten empty sections. The other 43 attempts yielded 27 HTTP 404 responses, 11 different SKUs, one redirect to the homepage, and four redirects outside the permitted source. Store access rules or fallback URLs excluded a further 42 entries. The snapshot contains verified local main photos for 4,467 SKUs across 3,888 distinct JPEGs. Names, storefront prices and public catalogue fields remain available where supplied, including for products with no accessible detail page.
+
+Of the 54 records without a local image, 34 had no usable official main image and 20 retained an official image URL whose host’s public crawler rules could not be verified. In **Documents & sources**, these 20 records still link to the original image. A store add-on offer appears separately from documented accessories and expansion interfaces. For example, the R1125-10 has 25 documented entries and two additional store offers. [Open R1125-10 locally](http://127.0.0.1:8765/#product=113991334&tab=accessories)
+
+The same review found **12,939 distinct resource URLs**. Of these, 3,297 are retained as links because of source, type or access restrictions. All **9,642 eligible official URLs** were attempted. Target-content screening finished for **7,290**, and **2,352** remained incomplete. These include 969 protected files, 939 without a usable text layer, 62 partial OCR results, 212 missing files, 150 access denials and 20 other source problems. The team reviewed 187 pages from nine scanned documents with potential quoting information. SKU `110991984`, for example, lists four screws in its store packing list while assembly step 4 uses six. Both sources are linked. [Open the packing-list comparison](http://127.0.0.1:8765/#product=110991984&tab=parts)
+
+In the resulting snapshot, 3,820 SKUs have structured specifications, 2,943 have in-box rows, and 1,234 link to official Wiki material. Of 3,470 SKUs with linked resources, 3,068 have a source that completed screening. Verified documents contributed **2,922 model-scoped source records across 205 SKUs** and 622 distinct host–accessory SKU pairs. The catalogue keeps each source and its scope when a kit revision, assembly instruction or series manual differs from the product page. [Grove kit with 40 linked module SKUs and original worksheet rows](http://127.0.0.1:8765/#product=110020230&tab=parts)
 
 - An empty field means there is no recorded value. The interface distinguishes a checked section with no entry, a section awaiting verification and raw rows that require review. An empty customization field does not establish whether engineering can offer a service.
 - The store’s *Part List* can contain specifications. The workbench displays identifiable attributes and package contents separately. Check the source and whether it applies to the SKU or the family. Some manufacturers list equipment without a quantity. An accessory listing alone does not establish that the accessory ships with the product.
 - Each SKU uses at most one catalogue main image. Identical JPEGs share a file. Wiki pages and PDF manuals open at the publisher. Verified PDF references can land on a specific file page. The store, its stock and the manuals can change after the snapshot.
+- Open **Specifications** to view original model columns, technical details and hardware overview links. **Documents & sources** identifies purchase links in the official English Wiki, the evidence for each document row, and the physical PDF page when available. For example, the EdgeLogix manual lists the 8 GB RAM and 32 GB eMMC configuration for SKU `102110773` on file page 17. [Open that model locally](http://127.0.0.1:8765/#product=102110773&tab=attributes) · [Seeed manual, page 17](https://files.seeedstudio.com/wiki/raspberry-pi/seeed-studio-raspberry-pi-series-catalog-v1.1.pdf#page=17)
 
 ## Optional AI conversations
 
@@ -48,6 +59,35 @@ Answers identify official sources, local records and project or page context whe
 3. Watch the progress and the two dates. **Last store check** records a successful check. **Last successful catalog write** records when product data was applied. If the store rate-limits requests, wait until **Resume after**, then use **Resume job**. The previous catalogue remains available while work is staged.
 
 Updates depend on the public store’s page layouts, search interface and available documents. A changed page may leave fields pending. Recheck manufacturer links and PDF pages when a manual changes.
+
+<details>
+<summary>For catalogue maintainers · reproduce a full source review</summary>
+
+Use a separate temporary folder for each dated review. The desktop app and user profile can stay open. Product pages are fetched in sequence under the store’s published rules. A processing stop or HTTP 429 leaves the completed SKU records in that folder. Resume the same step after its retry time. These commands run from the extracted project folder in PowerShell.
+
+```powershell
+$reviewDir = Join-Path $env:TEMP "seeed-public-review"
+$docDir = Join-Path $reviewDir "documents"
+$pythonExe = ".\.venv\Scripts\python.exe"
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --reconcile
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --pages
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --assemble
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --references
+& $pythonExe -m backend.document_enrichment --catalog "$reviewDir\catalog.js" --links "$reviewDir\document-links.json" --output $docDir --discovered --global-catalog
+& $pythonExe -m backend.document_merge --catalog "$reviewDir\catalog.js" --output $docDir
+& $pythonExe -m backend.catalog_release --stage $reviewDir --documents $docDir --output "$reviewDir\reviewed\catalog.js"
+```
+
+PDF review on the maintainer’s PC requires Poppler’s `pdftotext` or `pypdf`. English Wiki reverse matching uses the separately obtained official Markdown checkout, `backend.wiki_purchases` and `backend.document_wiki`. Use each module’s `--help` for its revision and mapping arguments. The result is staged for inspection. Check the totals, exceptions, sample SKUs and any new JPEGs before distributing a new snapshot. Remove the temporary review once publication and verification finish.
+
+To install your checked result, finish any active update and stop this installation of the assistant first. Run `& $pythonExe -m backend.catalog_release --stage $reviewDir --install-reviewed "$reviewDir\reviewed\catalog.js"`, then restart it. Installation verifies the original catalogue fingerprint, the completion counts and each referenced local photo before replacing the public catalogue. Your personal profile stays in its own folder.
+
+The full document review runs separately from a routine catalogue update in Developer. In `backend.document_enrichment`, `--verify-digests` rechecks earlier documents that lack a file hash. On Windows, `--ocr-scans` takes the full path to Poppler’s `pdftoppm.exe`, and `--ocr-max-pages` limits text recognition per document. The review retains a direct source link and page reference for checked findings.
+
+Maintainers with a signed-in GitHub CLI can optionally pass `--host api.github.com --github-cli` to that document review command. It uses the existing account’s official API quota for verified public Seeed repositories and verifies the file contents against GitHub’s published identifier. Daily workbench use requires neither GitHub CLI nor a GitHub account.
+
+</details>
 
 ## Back up, update the app or change PCs
 
@@ -71,4 +111,4 @@ Updates depend on the public store’s page layouts, search interface and availa
 | Favorites or projects seem to be missing | Confirm the browser address uses the local port your launcher opened, and that you launched the same extracted folder under the same Windows account. Personal data lives with that installation. |
 | An AI answer or product detail is unavailable | Check the selected provider, model and key. For the product, use its store URL and source links, inspect the coverage status, or request a scoped refresh. |
 
-The catalogue uses public material from the Seeed international store and Seeed Studio Wiki. Product images, trademarks and linked documents remain subject to their respective owners’ terms. Confirm permission with the owner before republishing material or redistributing the software beyond the intended team. [Seeed international store](https://www.seeedstudio.com/) · [Seeed Studio Wiki](https://wiki.seeedstudio.com/)
+The catalogue uses public material from the Seeed international store and Seeed Studio Wiki. Product images, trademarks and linked documents remain subject to their respective owners’ terms. Wiki purchase-button links cite the English source revision used for this review. Consult the publisher’s licensing information before redistributing material. [Seeed international store](https://www.seeedstudio.com/) · [Seeed Wiki licensing](https://wiki.seeedstudio.com/License/) · [English Wiki source revision](https://github.com/Seeed-Studio/wiki-documents/tree/c9321cc04d695f7b89ed273908558854fe00ab50/sites/en/docs)

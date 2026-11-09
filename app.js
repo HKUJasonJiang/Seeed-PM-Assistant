@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   const view=document.getElementById('view');
+  const publicPreview=Boolean(document.querySelector('meta[name="seeed-public-preview"]'));
   let base=window.SEEED_CATALOG;
   if(!base){view.textContent='产品目录未载入。The catalogue could not be loaded.';return;}
   let db=base, search, currentProduct, currentAlternatives=[];
@@ -15,15 +16,17 @@
   const safe=u=>typeof u==='string'&&(/^https?:\/\//i.test(u)||/^(?:data\/jpg\/|\/user-images\/)[a-z\d._-]+$/i.test(u));
   const link=(url,label,cls='')=>safe(url)?`<a class="${cls}" href="${h(url)}" target="_blank" rel="noopener noreferrer">${h(label)}</a>`:'';
   const short=p=>p.name.match(/^reComputer\s+(?:(?:Industrial|Super|Robotics|Rugged)\s+)?[JR]\d+(?:-\d+)?(?:\s*\(w\/o power adapter\))?/i)?.[0]||p.name;
-  const photo=(p,cls='')=>`<div class="photo ${cls}">${safe(p.image||p.imageUrl)?`<img loading="lazy" src="${h(p.image||p.imageUrl)}" alt="${h(p.name)}">`:''}</div>`;
+  const photo=(p,cls='')=>`<div class="photo ${cls}">${safe(p.image||(!p.detailAudit&&p.imageUrl))?`<img loading="lazy" src="${h(p.image||p.imageUrl)}" alt="${h(p.name)}">`:''}</div>`;
   const productLink=(p,label=p.sku,cls='sku')=>`<a class="${cls}" href="#product=${encodeURIComponent(p.sku)}">${h(label)}</a>`;
+  const storeOffer=a=>a.type==='商品页 Also Add 加购项'&&!a.documentedAsAccessorySource;
   const title=(name,desc)=>`<div class="page-title"><h1>${h(name)}</h1><p>${h(desc)}</p></div>`;
   const table=(heads,rows)=>`<div class="table-scroll"><table><thead><tr>${heads.map(x=>`<th>${h(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c||''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const el=id=>document.getElementById(id);
   const price=p=>{
     const fmt=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:p.currency||'USD'}).format(v);
-    if(p.price>0)return (p.maxPrice>p.price?fmt(p.price)+' – '+fmt(p.maxPrice):fmt(p.price))+' '+(p.currency||'');
-    return p.maxPrice>0?t('最高 '+fmt(p.maxPrice)+' · 起价待核','Up to '+fmt(p.maxPrice)+' · minimum unconfirmed'):'';
+    const note=p.storePageStatus==='not_found'?t('留档价 · ','Archived price · '):'';
+    if(p.price>0)return note+(p.maxPrice>p.price?fmt(p.price)+' – '+fmt(p.maxPrice):fmt(p.price))+' '+(p.currency||'');
+    return p.maxPrice>0?note+t('最高 '+fmt(p.maxPrice)+' · 起价待核','Up to '+fmt(p.maxPrice)+' · minimum unconfirmed'):'';
   };
   async function api(path,options={}){
     if(location.protocol==='file:')throw Object.assign(new Error(t('请用启动助手打开本地服务。','Open the local launcher first.')),{code:'service_offline'});
@@ -57,7 +60,7 @@
   function shell(){
     document.documentElement.lang=lang;document.title=t('Seeed Studio · 产品选型助手','Seeed Studio · Product workbench');
     document.querySelector('.app-name').textContent=t('产品选型助手','Product workbench');
-    el('mode-name').textContent=connected?t('本地工作台','Local workspace'):t('离线目录','Offline catalogue');
+    el('mode-name').textContent=publicPreview?t('只读采集预览','Read-only catalogue preview'):connected?t('本地工作台','Local workspace'):t('离线目录','Offline catalogue');
     el('nav').setAttribute('aria-label',t('工作区','Workspace'));
     const entries=[['assistant','⌕',t('选型查询','Product finder')],['catalog','▦',t('产品目录','Catalogue')],['favorites','☆',t('我的收藏','Favorites')],['custom','▧',t('定制服务','Customization')],['coverage','▤',t('采集概况','Coverage')]];
     el('nav').innerHTML=entries.map(([id,icon,name])=>`<button data-view="${id}" aria-current="${id===state.view?'page':'false'}"><span aria-hidden="true">${icon}</span>${h(name)}</button>`).join('');
@@ -67,6 +70,11 @@
     el('service-status').innerHTML=connected?'':`<div class="service-note">${t('当前可以查询产品。双击项目内的「启动助手.cmd」即可使用收藏、编辑、更新和 AI。','Offline catalogue. Open “Start Assistant.cmd” in the project folder for saved work, updates and AI.')} <a href="http://127.0.0.1:8765/" rel="noopener">${t('打开已启动的工作台','Open a running workspace')} ↗</a></div>`;
     if(connected)window.Workbench?.sidebarFavorites();
     else el('sidebar-favorites').replaceChildren();
+    if(publicPreview){
+      for(const item of document.querySelectorAll('[data-view="favorites"],[data-view="custom"],#developer-link'))item.hidden=true;
+      const other=lang==='en'?'zh':'en';
+      el('service-status').innerHTML=`<div class="service-note">${t('阶段性公开资料预览。采集覆盖和剩余项目可在「采集概况」中查看。','Interim public catalogue. Open Coverage to see what has been checked and what remains.')} <a href="?lang=${other}${h(location.hash)}">${lang==='en'?'简体中文':'English'}</a></div>`;
+    }
   }
   function queryForm(){
     const samples=lang==='en'?['J4012, need Super mode','R1100 with EU868','Industrial gateway with RS485 and DIN rail']:['J4012 需要 Super 模式','R1100，客户需要 EU868','工业网关，需要 RS485 和导轨'];
@@ -81,8 +89,12 @@
     const missing=(p.missingSummary||p.notes.filter(n=>n.kind==='另购说明').slice(0,2).map(n=>n.text)).map(local);
     const description=state.pin?t('指定产品','Selected product'):result.selection||(result.explicit?t('指定产品','Selected product'):t('需求匹配结果','Requirement match'));
     const proof=window.Workbench?.customizationInfo(p);
-    const custom=proof?.text||(p.custom&&p.customUrl?local(p.custom):'');
-    const customSource=proof?proof.url:p.customUrl;
+    const serviceMention=p.notes.find(n=>n.kind==='定制说明'&&n.source);
+    const custom=proof?.text||(p.custom&&p.customUrl?local(p.custom):serviceMention?t('官方资料提及定制服务，适用范围待核','Customization service mentioned; scope needs confirmation'):'');
+    const customSource=proof?proof.url:p.customUrl||serviceMention?.source;
+    const options=(p.accessories||[]).filter(a=>!storeOffer(a)),offerCount=(p.accessories||[]).length-options.length;
+    const interfaces=options.filter(a=>a.type==='Expansion interface').length;
+    const optionCount=options.length?(interfaces===options.length?t(interfaces+' 个扩展接口',interfaces+' expansion interfaces'):t(options.length+' 项',options.length+' items')):t('暂无已核条目','No verified items');
     const attrs=p.attributes||[];
     const modelSpecs=p.modelSpecs||[];
     const fields=attrs.length?attrs:modelSpecs;
@@ -91,23 +103,36 @@
       ${p.url?`<div class="product-url">${link(p.url,p.url)}</div>`:''}
       <div class="hero-product">${photo(p,'hero-photo')}<div><div class="eyeline">${h(p.groups[0]||p.paths[0]?.[0]||(p.isLocal?t('本地产品','Local product'):t('海外商城','Global store')))}</div>
       <h2>${h(short(p))}</h2>${short(p)!==p.name?`<div class="official-name">${h(p.name)}</div>`:''}<div class="item-sku">SKU <b>${h(p.sku)}</b></div><div class="hero-price">${h(price(p))}</div>
-      ${p.updated?`<span class="date">${t('商城快照','Store snapshot')} · ${h(p.updated)}</span>`:''}</div></div>
+      ${p.updated?`<span class="date">${t('商城快照','Store snapshot')} · ${h(p.updated)}</span>`:''}
+      ${p.stockStatus&&p.storePageStatus!=='not_found'?`<span class="date"> · ${h(({IN_STOCK:t('官网有货','In stock'),OUT_OF_STOCK:t('官网无货','Out of stock')})[p.stockStatus]||p.stockStatus)}</span>`:''}
+      ${p.storeLifecycle?`<span class="date"> · ${t('官网生命周期','Store lifecycle')} ${h(p.storeLifecycle)} ${p.lifecycleSource?link(p.lifecycleSource,t('来源 ↗','Source ↗')):''}</span>`:''}
+      ${p.catalogStatus==='retained_previous'?`<span class="date"> · ${t('保留的历史 SKU','Retained from an earlier catalogue')}</span>`:''}</div></div>
+      ${/^(?:eol|end[ -]of[ -]life|discontinued)$/i.test(p.storeLifecycle||'')?`<p class="warn">${t('官网将这款产品标为停产。报价前请核实剩余库存或替代型号。','The store marks this product as end of life. Confirm remaining stock or a replacement before quoting.')}</p>`:''}
+      ${p.catalogStatus==='live_secondary'?`<p class="warn">${p.storePageStatus==='not_found'?t('站点地图留档。商城路由仍返回该 SKU，商品页本轮返回 HTTP 404，价格与供货需另行确认。','Sitemap record. The store routing service still returns this SKU, but the product page returned HTTP 404 in this review. Confirm price and availability separately.'):t('该 SKU 来自官网站点地图和商品路由，未出现在公开搜索目录中。报价前请确认供货状态。','This SKU was found in the official sitemap and routing data and is absent from public product search. Confirm availability before quoting.')} ${link(db.audit?.sources?.sitemap,t('官网站点地图 ↗','Official sitemap ↗'))}</p>`:''}
+      ${/^DETAIL_.*(?:SKU|ID).*VERIF/i.test(p.detailAudit?.error||'')?`<p class="warn">${t('本次打开该网址时，未能确认页面对应此 SKU。请按 SKU 核对目录记录与所引手册。','This product page could not be verified as the same SKU. Check the SKU in the catalogue record and the cited documentation.')} ${landingEvidence(p)}</p>`:''}
       ${terms.length?`<div class="tokens">${terms.map(s=>`<span>${h(s)}</span>`).join('')}</div>`:''}
       ${highlights.length?`<div class="spec-highlights">${highlights.map(a=>`<span><small>${h(attributeLabel(a.name))}</small> ${h(a.value)}</span>`).join('')}</div>`:''}
       ${missing.length?`<div class="missing-line"><b>${t('需另购 / 不随箱','Sold separately')}</b><span>${h(missing.join(lang==='en'?', ':'、'))}</span><button class="textbtn" data-tab="notes">${t('查看依据','Evidence')} ›</button></div>`:''}
       ${conflict?`<p class="warn"><b>${t('需求差异','Requirement gap')}</b> ${t('这个 Classic 版本不支持 Super 模式。请比较右侧的 Super J4012。','This Classic version does not support Super mode. Compare the Super J4012 in alternatives.')}</p>`:''}
-      <div class="detail-key"><div><small>${t('定制范围','Customization')}</small><div>${h(custom)}</div>${customSource?link(customSource,t('查看来源 ↗','Source ↗')):''}</div>
+      <div class="detail-key"><div><small>${t('定制范围','Customization')}</small><div>${h(custom)}</div>${customSource?link(customSource,t('查看来源 ↗','Source ↗')):''}${serviceMention&&!proof?` <button class="textbtn" data-tab="notes">${t('查看说明','Details')} ›</button>`:''}</div>
       <div><small>${t('官网属性','Store attributes')}</small><button class="textbtn" data-tab="attributes">${attrs.length?t(attrs.length+' 项属性',attrs.length+' fields'):modelSpecs.length?t(modelSpecs.length+' 项型号配置',modelSpecs.length+' model specs'):recordLabel(p.attributeStatus)} ›</button></div>
       <div><small>${t('箱内清单','In the box')}</small><button class="textbtn" data-tab="parts">${p.parts.length?t(p.parts.length+' 项随附',p.parts.length+' included'):recordLabel(p.partStatus)} ›</button></div>
-      <div><small>${t('配件与扩展','Accessories')}</small><button class="textbtn" data-tab="accessories">${p.accessories?.length?t(p.accessories.length+' 项配件',p.accessories.length+' items'):t('暂无已核条目','No verified items')} ›</button></div></div>
+      <div><small>${t('配件与扩展','Accessories & expansion')}</small><button class="textbtn" data-tab="accessories">${optionCount} ›</button>${offerCount?`<small>${t('另有 '+offerCount+' 个商城加购项',offerCount+' store add-on offers')}</small>`:''}</div></div>
       ${p.sharedUrl?`<small>${t('多个 SKU 共用上述商品页。','Multiple SKUs share this product page.')}</small>`:''}
-      ${p.summary?`<details class="summary"><summary>${p.isEdited?t('产品简介','Product summary'):t('官网产品简介','Store summary')}</summary><p>${h(p.summary)}</p></details>`:''}</section>`;
+      ${specCount(p)?`<button class="textbtn spec-shortcut" data-tab="specs">${t('查看官网技术规格','View store specifications')} ›</button>`:''}
+      ${p.summary||p.storeFeatures?.length||p.storeApplications?.length?`<details class="summary"><summary>${p.isEdited?t('产品简介','Product summary'):t('官网产品简介','Store summary')}</summary>${p.summary?`<p>${h(p.summary)}</p>`:''}${listed(t('官网特性','Store features'),p.storeFeatures)}${listed(t('应用场景','Applications'),p.storeApplications)}</details>`:''}</section>`;
   }
   function facts(p){
     const e=p.wikiEvidence?.[0];
     if(e)return `<section class="panel evidence-panel"><div class="section-label">${t('选型依据','Selection evidence')}</div><p>${h(e[lang==='en'?'en':'zh'])}</p>${link(e.url,'Seeed Wiki · '+e.scope+' ↗','source-link')}</section>`;
+    const kinds={exclusion:t('另购 / 不随箱','Sold separately'),expansion:t('扩展接口','Expansion interface'),modelSpec:t('型号参数','Model specification'),accessory:t('手册列出的配件','Documented accessory'),inbox:t('随箱物料','In-box item'),customization:t('定制服务','Customization')};
+    const verified=(p.verifiedDocumentRows||[]).filter(r=>kinds[r.kind]&&r.source);
+    if(verified.length){
+      const order=Object.keys(kinds),rows=[...verified].sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind)).slice(0,2);
+      return `<section class="panel evidence-panel"><div class="section-label">${t('选型依据','Selection evidence')}</div>${rows.map(r=>`<p>${h(kinds[r.kind])} · ${h([r.name,r.value,r.quantity?'× '+r.quantity:''].filter(Boolean).join(' '))} ${evidenceLink(r.source)}</p>`).join('')}</section>`;
+    }
     const none=p.isLocal?t('该 SKU 来自本地人工记录，尚无经核对的 Wiki 结论。','This SKU is a local record. It has no verified Wiki finding.'):t('尚无经核对的型号 Wiki 结论。可从商品页核对规格。','No model-specific Wiki finding has been verified. Check the product specifications on the store page.');
-    return `<section class="panel evidence-panel"><div class="section-label">${t('选型依据','Selection evidence')}</div><p>${none}</p>${link(p.url,t('商品链接 ↗','Product link ↗'),'source-link')}${p.wikiLinks?.length?` <button class="textbtn" data-tab="docs">${t('查看随附 Wiki','Linked Wiki resources')} ›</button>`:''}</section>`;
+    return `<section class="panel evidence-panel"><div class="section-label">${t('选型依据','Selection evidence')}</div><p>${none}</p>${link(p.url,t('商品链接 ↗','Product link ↗'),'source-link')}${p.wikiLinks?.length?` <button class="textbtn" data-tab="docs">${t('查看关联 Wiki','Linked Wiki resources')} ›</button>`:''}</section>`;
   }
   function related(p,rec){
     return `<section class="panel related"><div class="section-label">${t('相似与替代产品','Alternatives')}</div>${rec.length?rec.map(({p:a,why})=>{
@@ -118,11 +143,43 @@
   const attributeNames={'Product Type':'产品类型','Categories':'分类','Sensors':'传感器','Series':'系列','RAM':'内存（RAM）','Storage':'存储','Operating System':'操作系统','Network':'网络','Interface':'接口','Connectivity':'连接方式'};
   const attributeLabel=name=>lang==='en'?name:attributeNames[name]||name;
   const recordLabel=status=>status==='empty'?t('已查栏目未列出','No entry in checked section'):status==='unparsed'?t('待核对原文','Review source'):t('待核对','Pending verification');
-  const defaultTab=p=>p.attributes?.length||p.modelSpecs?.length?'attributes':'parts';
-  const tabs=p=>({attributes:t('官网属性','Store attributes'),parts:t('箱内清单','In the box'),accessories:t('配件与扩展','Accessories'),...(p.unclassifiedRows?.length?{raw:t('原表待核','Rows to review')}:{}),notes:t('定制与另购','Options & exclusions'),docs:t('文档与来源','Documents & sources')});
+  const listed=(name,values)=>values?.length?`<b>${h(name)}</b><ul>${values.map(x=>`<li>${h(x)}</li>`).join('')}</ul>`:'';
+  const numberOfRows=(tables,text)=>(tables||[]).reduce((count,table)=>count+table.rows.length,0)+(text?.length||0);
+  const specCount=p=>numberOfRows(p.specTables,p.specText)+numberOfRows(p.referenceSections?.certification_info_tech?.tables,p.referenceSections?.certification_info_tech?.text);
+  const defaultTab=p=>p.attributes?.length||p.modelSpecs?.length?'attributes':!p.parts?.length&&specCount(p)?'specs':'parts';
+  const tabs=p=>({attributes:t('官网属性','Store attributes'),specs:t('技术规格','Specifications'),parts:t('箱内清单','In the box'),accessories:t('配件与扩展','Accessories'),...(p.unclassifiedRows?.length?{raw:t('原表待核','Rows to review')}:{}),notes:t('定制与另购','Options & exclusions'),docs:t('文档与来源','Documents & sources')});
+  function storeSpecifications(p){
+    const statuses={empty:t('已查阅该 SKU 的 Specification 栏，官网未列正文。','The checked Specification section contains no text.'),image:t('原站以图像或嵌入内容展示规格，可打开原文查看。','The store presents specifications as images or embedded content. Open the source to inspect them.'),unparsed:t('已读取该栏目，原文格式需要复核。','The section was retrieved. Its source format needs review.')};
+    const count=numberOfRows(p.specTables,p.specText),source=evidenceLink(p.specSource||p.url);
+    const extra=referenceSections(p,['certification_info_tech','hardware_overview']);
+    if(!count)return (extra||`<div class="record-empty"><p>${h(statuses[p.specStatus]||t('此 SKU 的技术规格栏目尚未核对。','The Specification section has not been checked for this SKU.'))}</p>${source}</div>`);
+    const omitted=p.specRowsOmitted?t('另有 '+p.specRowsOmitted+' 段或行需在原文查看。',p.specRowsOmitted+' additional blocks or rows are available in the source.'):'';
+    const origin=p.specLocation==='description'?t('来源为商品正文中的规格小节。','From the specifications in the product description.'):t('来源为商品的 Specification 专栏。','From the dedicated store Specification section.');
+    return `<p class="caption">${origin} ${t('对照表中请读取对应型号一列。','In comparison tables, read the column for your model.')} ${h(omitted)} ${source}</p>${officialTables(p.specTables)}${listed(t('官网说明','Store notes'),p.specText)}${extra}`;
+  }
+  function officialTables(tables){
+    return (tables||[]).map(({title,rows})=>{
+      const body=rows.map(row=>'<tr>'+row.map(cell=>{
+        const entry=typeof cell==='object'?cell:{text:cell};
+        const tag=entry.header?'th':'td';
+        const spans=['rowspan','colspan'].filter(key=>Number.isInteger(entry[key])&&entry[key]>1&&entry[key]<=200).map(key=>' '+key+'="'+entry[key]+'"').join('');
+        const uncertain=entry.unconfirmed?`<small>${t('官网以零值占位，尺寸待核','All-zero source value; dimensions unconfirmed')}</small>`:'';
+        return '<'+tag+spans+'>'+h(entry.text)+uncertain+'</'+tag+'>';
+      }).join('')+'</tr>').join('');
+      return `<div class="table-scroll official-specs"><table>${title?`<caption>${h(title)}</caption>`:''}<tbody>${body}</tbody></table></div>`;
+    }).join('');
+  }
+  function referenceSections(p,keys){
+    const titles={certification_info_tech:t('技术参数附表','Technical details'),hardware_overview:t('硬件概览','Hardware overview'),certification_info:t('商品页认证栏目','Store certification section'),certification_info_eccn:t('商品页编码栏目','Store classification codes'),faq_list:t('常见问题','FAQ')};
+    return keys.filter(k=>p.referenceSections?.[k]).map(k=>{
+      const s=p.referenceSections[k];
+      return `<section><h3>${titles[k]}</h3><p class="caption">${s.mediaOnly?t('此栏以图示展示，见商品页。','This section uses images; see the product page.')+' ':''}${evidenceLink(s.source||p.url)}</p>${officialTables(s.tables)}${listed(t('官网说明','Store notes'),s.text)}</section>`;
+    }).join('');
+  }
   function evidenceLink(url){
     if(!url)return '';
-    if(/\/\/wiki\.seeedstudio\.com\//i.test(url))return link(url,t('系列 Wiki ↗','Family Wiki ↗'));
+    if(/\/\/wiki\.seeedstudio\.com\//i.test(url))return link(url,t('官网 Wiki ↗','Official Wiki ↗'));
+    if(/\/\/github\.com\/Seeed-Studio\/wiki-documents\/blob\//i.test(url))return link(url,t('官方 Wiki 源文件 ↗','Official Wiki source ↗'));
     if(/\.pdf(?:[?#]|$)/i.test(url)){
       const page=url.match(/#page=(\d+)/i)?.[1];
       return link(url,page?t('PDF 第 '+page+' 页 ↗','PDF page '+page+' ↗'):t('官方手册 ↗','Official manual ↗'));
@@ -143,12 +200,13 @@
     return `<div class="record-empty"><p>${h(explanation)}</p>${p.unclassifiedRows?.length?`<button class="textbtn" data-tab="raw">${t('查看待核的官网原表行','View original rows awaiting review')} ›</button> · `:''}${evidenceLink((isParts?p.partSource:p.attributeSource)||p.url)}</div>`;
   }
   function information(p){
-    const counts={attributes:p.attributes?.length||p.modelSpecs?.length,parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:p.accessories?.length,notes:p.notes.length+Number(Boolean(window.Workbench?.customizationInfo(p)||p.custom&&p.customUrl)),docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
+    const counts={attributes:p.attributes?.length||p.modelSpecs?.length,specs:specCount(p),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:p.accessories?.filter(a=>!storeOffer(a)).length,notes:p.notes.length+Number(Boolean(window.Workbench?.customizationInfo(p)||p.custom&&p.customUrl)),docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
     const active=state.tab||defaultTab(p);
     return `<section class="panel information"><div class="tabs" role="tablist">${Object.entries(tabs(p)).map(([id,name])=>`<button role="tab" data-tab="${id}" aria-selected="${active===id}">${h(name)}${counts[id]?`<sup>${counts[id]}</sup>`:''}</button>`).join('')}</div><div id="tabbody" role="tabpanel">${tabBody(p)}</div></section>`;
   }
   function tabBody(p){
     const active=state.tab||defaultTab(p);
+    if(active==='specs')return storeSpecifications(p);
     if(active==='raw'){
       return `<p class="caption">${t('官网栏目包含下列原文，尚待确认它们是随附物料、规格还是其他说明。','These original store rows require review before they can be classified as included items, specifications or other information.')} ${evidenceLink(p.unclassifiedSource||p.url)}</p>`+
         table([t('官网原文','Original store text')],(p.unclassifiedRows||[]).map(row=>[h(Array.isArray(row)?row.join(' · '):row)]));
@@ -156,31 +214,69 @@
     if(active==='attributes'){
       const raw=p.attributes||[],model=p.modelSpecs||[];
       if(!raw.length&&!model.length)return emptyRecord(p,false);
-      const intro=raw.length?t('以下是该 SKU 的官网 Part List 原表属性。是否随附硬件请查看箱内清单。','These attributes come from the store’s Part List for this SKU. See “In the box” for bundled hardware.'):t('以下配置来自该型号的海外商城商品标题。','These model specifications come from this SKU’s global store product title.');
-      const titleEvidence=raw.length&&model.length?`<p class="caption">${t('商城型号标题','Store product title')} · ${h(model.map(a=>attributeLabel(a.name)+' '+a.value).join(' · '))} ${evidenceLink(model[0].source||p.url)}</p>`:'';
+      const intro=raw.length?t('以下是该 SKU 的官网 Part List 原表属性。是否随附硬件请查看箱内清单。','These attributes come from the store’s Part List for this SKU. See “In the box” for bundled hardware.'):t('以下配置按本型号的商品标题或官方手册逐项核对。','These model details are attributed individually to a store title or official manual.');
+      const titleEvidence=raw.length&&model.length?`<p class="caption">${t('已核型号配置','Verified model details')} · ${model.map(a=>h(attributeLabel(a.name)+' '+a.value)+' '+evidenceLink(a.source||p.url)).join(' · ')}</p>`:'';
       const fields=raw.length?raw:model;
       return `<p class="caption">${intro} ${p.specSource?link(p.specSource,t('官网完整规格 ↗','Full store specifications ↗')):''}</p>`+
         table([t('官网字段','Store field'),t('原始值','Store value'),t('依据','Source')],fields.map(a=>[h(attributeLabel(a.name))+(attributeLabel(a.name)!==a.name?`<small>${h(a.name)}</small>`:'')+(a.group?`<small>${h(a.group)}</small>`:''),h(a.value),evidenceLink(a.source||p.attributeSource||p.url)]))+titleEvidence;
     }
     if(active==='parts'){
-      if(!p.parts.length)return emptyRecord(p,true);
+      if(!p.parts.length)return documentConflicts(p,true)+emptyRecord(p,true);
       const doc=db.docs[p.partDoc];
       const noQty=p.parts.some(([,q])=>!q);
       const family=p.partEvidenceScope==='family'?t('以下随附物料来自官方系列资料。','The following included items are documented at the product-family level.'):p.partEvidenceScope==='mixed'?t('已合并本型号商品页与官方系列资料，依据逐项标注。','Includes SKU-specific and family-level records. Each row identifies its source.'):'';
-      const quantityNote=noQty?t('数量留空表示所引资料未给出数量。','A blank quantity means the source gives no count.'):'';
+      const quantityNote=noQty?t('数量留空表示原文未披露，或不同记录尚不足以确定总数。','A blank quantity means the source gives no count or the total could not be verified across records.'):'';
+      const conflictRows=new Map();
+      const addConflict=(name,quantity,source)=>{
+        const count=String(quantity||'').trim().replace(/^[×x]\s*(?=\d)/i,'');
+        conflictRows.set(JSON.stringify([String(name).trim().toLowerCase(),count,source]),[h(name),h(quantity),evidenceLink(source)]);
+      };
+      for(const c of p.partConflicts||[]){addConflict(c.name,c.existingQuantity,c.existingSource);addConflict(c.name,c.documentQuantity,c.documentSource);}
+      for(const [name,records] of Object.entries(p.partQuantityConflicts||{}))for(const item of records)addConflict(name,item.quantity,item.source);
+      const discrepancy=conflictRows.size?`<p class="warn">${t('以下物料的官方数量存在差异，报价前请核实。','Official sources disagree on these quantities. Confirm before quoting.')}</p>${table([t('物料','Item'),t('各来源记录的数量','Quantity in each source'),t('依据','Source')],[...conflictRows.values()])}`:'';
+      const alternate=(p.alternatePackingLists||[]).map(list=>{
+        const internal=list.kind==='assembly_components';
+        const label=internal?t('商城列出的装机组成','Installed components listed by the store'):list.kind==='document'?t('手册列出的同一包装清单','Document list for the same package'):t('商城按总成列出的同一包装清单','Storefront list for the same package, grouped by assembly');
+        const note=internal?t('这些部件属于主机组成。独立发货件数以随箱清单为准。','These components are installed in the host. Use the packing list for the separately shipped items.'):t('请按一种口径核数，商城清单与手册行数可有差异。','Count against one source. The store and the manual may group the same components differently.');
+        return `<details class="summary"><summary>${label}</summary><p class="caption">${note} ${evidenceLink(list.source)}</p>${table([t('原文物料名称','Original item name'),t('数量','Quantity'),t('依据','Source')],list.parts.map(([name,quantity])=>[h(name),h(quantity),evidenceLink(list.partSources?.[name]||list.source)]))}</details>`;
+      }).join('');
+      const packingRows=p.parts.map(([name,quantity])=>{
+        const note=p.partDescriptions?.[name],source=p.partSources?.[name]||p.partSource||(doc?doc.url+'#page=1':p.url);
+        const notePrefix=note?.kind==='alias'?t('其他官方资料用名：','Also listed as '):note?.kind==='configuration'?t('商城列出的系列选项：','Family options listed by the store: '):note?.kind==='crossListed'?t('该物料在多个分类重复列出，实际总数待核。','The item is printed in multiple categories. Its total quantity needs confirmation. '):'';
+        const noteText=note?.text?notePrefix+note.text:'';
+        const description=noteText?`<small>${h(noteText)} ${note.source&&note.source!==source?evidenceLink(note.source):''} ${note.crosscheck?link(note.crosscheck,t('手册核对 ↗','Manual confirmation ↗')):''}</small>`:'';
+        const sku=p.partProductSkus?.[name],target=sku&&search.bySku.get(String(sku).toLowerCase());
+        const published=p.partPublishedSkus?.[name];
+        const itemLink=target&&target.sku!==p.sku?`<small>${productLink(target,'SKU '+target.sku)}</small>`:published?`<small>${h(t('文件货号 ','Published SKU ')+published)}</small>`:'';
+        const precise=p.partSourceLocations?.[name];
+        const location=precise?`<small>${h([precise.sheet,precise.cellRange||t('第 '+precise.row+' 行','Row '+precise.row)].filter(Boolean).join(' · '))}</small>`:'';
+        const qtySource=p.partQuantitySources?.[name],qtyLink=qtySource&&qtySource!==source?'<small>'+link(qtySource,t('数量依据 ↗','Count source ↗'))+'</small>':'';
+        const more=(p.partOtherSources?.[name]||[]).filter(url=>url!==source&&url!==note?.crosscheck&&url!==qtySource).map((url,i)=>link(url,t('交叉依据 ','Additional source ')+(i+1)+' ↗')).join(' · ');
+        return [h(name)+itemLink+description,h(quantity)+qtyLink,evidenceLink(source)+location+(p.partScopes?.[name]==='family'?`<small>${t('系列资料','Family scope')}</small>`:'')+(more?'<small>'+more+'</small>':'')];
+      });
       return (family||quantityNote?`<p class="caption">${h([family,quantityNote].filter(Boolean).join(' '))}</p>`:'')+
-        table([t('随箱物料','Included item'),t('数量','Quantity'),t('依据','Source')],p.parts.map(([n,q])=>[h(n),h(q),evidenceLink(p.partSources?.[n]||p.partSource||(doc?doc.url+'#page=1':p.url))+(p.partScopes?.[n]==='family'?`<small>${t('系列资料','Family scope')}</small>`:'')]));
+        documentConflicts(p,true)+discrepancy+table([t('随箱物料','Included item'),t('数量','Quantity'),t('依据','Source')],packingRows)+alternate;
     }
     if(active==='accessories'){
-      if(!p.accessories?.length)return `<div class="record-empty"><p>${t('尚无已核实的选配或扩展件记录。','No optional accessories or expansions have been verified.')}</p>${evidenceLink(p.url)}</div>`;
-      const q=state.accFilter.trim().toLowerCase(), rows=(p.accessories||[]).filter(a=>[a.name,a.storeName,a.sku,a.type,a.note].join(' ').toLowerCase().includes(q));
-      return `<div class="list-tools"><input id="accfilter" aria-label="${t('筛选配件','Filter accessories')}" placeholder="${t('接口、频段或 SKU','Interface, band or SKU')}" value="${h(state.accFilter)}"><span>${rows.length} ${t('项','items')}</span></div>`+
-        table([t('配件及适用条件','Accessory and conditions'),'SKU',t('商城','Store'),t('依据','Source')],rows.map(a=>{
-          const target=search.bySku.get(a.sku.toLowerCase()),doc=db.docs[a.doc];
-          const evidence=doc?link(doc.url+'#page='+a.page,t('手册第 '+a.printed+' 页 ↗','Manual, printed page '+a.printed+' ↗')):evidenceLink(a.source);
-          const scope=a.scope?t(a.scope+' 系列选配',a.scope+' family option'):'';
-          return ['<b>'+h(a.storeName||a.name)+'</b><small>'+h([scope,a.type,a.note].filter(Boolean).map(local).join(' · '))+'</small>',target?productLink(target):h(a.sku),target?link(target.url,t('商品页 ↗','Store ↗')):'',evidence];
+      if(!p.accessories?.length)return documentConflicts(p)+`<div class="record-empty"><p>${t('尚无已核实的选配或扩展件记录。','No optional accessories or expansions have been verified.')}</p>${evidenceLink(p.url)}</div>`;
+      const q=state.accFilter.trim().toLowerCase(), rows=(p.accessories||[]).filter(a=>[a.name,a.storeName,a.sku,a.publishedSku,a.type,a.note,...(a.compatibilityDetails||[]).flatMap(c=>[c.interface,c.voltage,c.makeCode])].join(' ').toLowerCase().includes(q));
+      const accessoryRows=rows.filter(a=>!storeOffer(a)),offers=rows.filter(storeOffer);
+      const accessoryTable=group=>table([t('商品及适用条件','Item and conditions'),'SKU',t('商城','Store'),t('依据','Source')],group.map(a=>{
+          const target=search.bySku.get(String(a.sku||'').toLowerCase()),doc=db.docs[a.doc];
+          const evidence=doc?link(doc.url+'#page='+a.page,t('手册第 '+a.printed+' 页 ↗','Manual, printed page '+a.printed+' ↗')):evidenceLink(a.documentedAsAccessorySource||a.source);
+          const citations=[evidence];
+          if(a.documentedAsAccessorySource&&a.source&&a.source!==a.documentedAsAccessorySource)citations.push(link(a.source,t('商城加购 ↗','Store add-on ↗')));
+          const separate=a.notIncludedSource||a.soldSeparatelySource;
+          if(separate)citations.push(link(separate,t('不随箱 / 另购依据 ↗','Sold-separately evidence ↗')));
+          const scope=a.scope?(a.scope==='family'||a.scope.includes('_')?t('系列资料','Family documentation'):a.scope==='sku'?t('本型号','SKU scope'):t(a.scope+' 系列资料',a.scope+' family documentation')):'';
+          const type=a.documentedAsAccessorySource?t('官方文档列明的配件','Accessory listed in official documentation'):({'Expansion interface':t('扩展接口','Expansion interface'),'Official accessory list':t('官方文档列明的配件','Accessory listed in official documentation'),'Official compatibility list':t('官方兼容清单','Official compatibility list'),'Official module list':t('官方模组清单','Official module list'),'商品页标明选配':t('商品页标明选配','Optional on the store page')})[a.type]||local(a.type);
+          const identifier=target?productLink(target):h(a.sku||a.publishedSku)+(a.publishedSku?`<small>${t('文档编号，本地无对应商品','Published identifier, no local product')}</small>`:'');
+          const conditions=(a.compatibilityDetails||[]).map(d=>`<small>${h([d.interface,d.voltage,d.makeCode?'MakeCode · '+d.makeCode:'',d.sheet&&d.row?d.sheet+' · '+t('第 '+d.row+' 行','Row '+d.row):''].filter(Boolean).join(' · '))} ${d.source?evidenceLink(d.source):''}</small>`).join('');
+          return ['<b>'+h(a.storeName||a.name)+'</b><small>'+h([scope,type,local(a.note)].filter(Boolean).join(' · '))+'</small>'+conditions,identifier,target?link(target.url,t('商品页 ↗','Store ↗')):'',citations.filter(Boolean).join('<br>')];
         }));
+      return documentConflicts(p)+`<div class="list-tools"><input id="accfilter" aria-label="${t('筛选配件','Filter accessories')}" placeholder="${t('接口、频段或 SKU','Interface, band or SKU')}" value="${h(state.accFilter)}"><span>${rows.length} ${t('个匹配项','matches')}</span></div>`+
+        (accessoryRows.length?accessoryTable(accessoryRows):'')+
+        (offers.length?`<details class="summary" open><summary>${t('商品页同时推荐加购','Also Add offers from the store')} · ${num(offers.length)}</summary><p class="caption">${t('商城将这些商品展示在同一商品页，配套使用条件需另行核实。','The store offered these products together. Check compatibility for the intended configuration.')}</p>${accessoryTable(offers)}</details>`:'');
     }
     if(active==='notes'){
       const proof=window.Workbench?.customizationInfo(p);
@@ -194,8 +290,91 @@
     const seen=new Set();
     for(const e of p.wikiEvidence||[]){rows.push([h(e.title),link(e.url,t('已核对的 Wiki ↗','Verified Wiki ↗'))]);seen.add(e.url);}
     for(const d of p.docs){if(!seen.has(d.url)){rows.push([h(d.name),link(d.url,t('打开原文 ↗','Open source ↗'))]);seen.add(d.url);}}
-    for(const w of p.wikiLinks||[])if(!seen.has(w.url)){rows.push([h(w.title),link(w.url,t('商品页随附 Wiki ↗','Wiki linked by store ↗'))]);seen.add(w.url);}
-    return table([t('文档或来源','Document or source'),t('打开','Open')],rows);
+    for(const w of p.wikiLinks||[])if(!seen.has(w.url)){
+      const reverse=w.relation==='purchase_link'||w.relation==='declared_sku';
+      const label=w.declaredSku?t('Wiki 明确列出此 SKU ↗','Wiki explicitly lists this SKU ↗'):reverse?t('Wiki 中此 SKU 的购买入口 ↗','Wiki with purchase link to this SKU ↗'):t('商品页随附 Wiki ↗','Wiki linked by store ↗');
+      const revision=w.source+(w.metadataLine?'#L'+w.metadataLine:'');
+      const scope=w.sourceScope==='application'?t('应用教程','Application guide'):w.sourceScope==='multi_sku'?t('本页涉及多个 SKU','Covers multiple SKUs'):w.sourceScope==='component_guide'?t('部件指南，整套配置另核','Component guide, check kit contents separately'):'';
+      rows.push([h(w.title)+(scope?'<small>'+h(scope)+'</small>':''),link(w.url,label)+(reverse&&w.source?' · '+link(revision,t('官方源码 ↗','Source revision ↗')):'')]);seen.add(w.url);
+    }
+    const relationNames={related:t('商城相关商品','Store-related product'),upsell:t('商城升级推荐','Suggested upgrade'),crosssell:t('商城搭配推荐','Store cross-sell')};
+    for(const relation of p.storeRelations||[]){
+      const target=search.bySku.get(String(relation.sku).toLowerCase());
+      rows.push([h(relationNames[relation.kind]||t('商城推荐','Store recommendation'))+' · '+(target?productLink(target,target.name):h(relation.sku)),evidenceLink(relation.source||p.url)]);
+    }
+    const audit=p.documentAudit;
+    const checked=audit?`<p class="caption">${h(t('关联 '+audit.linked+' 份来源，已筛查可读正文 '+audit.checked+' 份，其中 '+audit.parsed+' 份含目标内容。已确认适用于此 SKU 的资料记录 '+(audit.verifiedRows||0)+' 条。未查全 '+audit.unread+' 份，读取失败 '+audit.failed+' 份。',audit.linked+' linked sources. Readable content was screened in '+audit.checked+', and '+audit.parsed+' contained relevant sections. '+(audit.verifiedRows||0)+' source records were verified for this SKU. '+audit.unread+' sources remain incomplete and '+audit.failed+' failed.'))}</p>`:'';
+    const sources=(p.documentChecks||[]).map(c=>{
+      const status=h(documentState(c.status))+(c.reason?`<small>${h(sourceReason(c.reason))}</small>`:'');
+      const checked=c.pages?.length?c.pages.map(page=>link(c.url.split('#')[0]+'#page='+page,t('文件第 '+page+' 页 ↗','File page '+page+' ↗'))).join(' · '):link(c.url,t('打开 ↗','Open ↗'));
+      const worksheets=(c.worksheets||[]).map(w=>'<small>'+h(w.name+' · '+t('第 '+w.firstRow+'–'+w.lastRow+' 行','Rows '+w.firstRow+'–'+w.lastRow))+'</small>').join('');
+      const sections=(c.sectionLinks||[]).map(item=>{
+        const label=item.page?t('第 '+item.page+' 页','Page '+item.page):item.heading||t('原文段落','Original section');
+        const scopes={example:t('示例配置','Example configuration'),example_configuration:t('示例配置','Example configuration'),component_guide:t('部件自身资料','Component documentation'),assembly_components:t('装机组成','Installed components'),certification:t('认证送审材料','Certification submission materials'),ecosystem:t('生态系统通用资料','Ecosystem reference')};
+        const scope=scopes[item.kind]||t('清单适用型号待核','List with unconfirmed model scope');
+        return link(item.url,scope+' · '+label+' ↗');
+      }).filter(Boolean);
+      const pending=sections.length?`<small>${sections.join(' · ')}</small>`:'';
+      return [h(c.title||c.url),status,checked+worksheets+pending];
+    });
+    const supplemental=referenceSections(p,['certification_info','certification_info_eccn','faq_list']);
+    return checked+documentConflicts(p)+table([t('文档或来源','Document or source'),t('打开','Open')],rows)+productReview(p)+(sources.length?`<details class="summary"><summary>${t('查看各来源的核对结果','Review status for each source')}</summary>${table([t('资料','Source'),t('本轮检查','Review status'),t('原文','Original')],sources)}</details>`:'')+(supplemental?`<details class="summary"><summary>${t('官网其他详情栏目','Additional store sections')}</summary>${supplemental}</details>`:'');
+  }
+  function documentConflicts(p,packingOnly=false){
+    const entries=(p.documentConflicts||[]).filter(c=>!packingOnly||c.field!=='fieldOfView');
+    const rows=entries.map(c=>[h(c.publishedSku),h(c.name)+'<small>'+evidenceLink(c.source)+'</small>',h(c.catalogName)+'<small>'+evidenceLink(c.catalogUrl)+'</small>']);
+    const label=packingOnly?t('商城装箱与其他官方资料有差异，报价前需核实','Packing list differs from other official guidance; verify before quoting'):t('手册与商城资料有差异，选型前需核实','Manual and store details disagree; verify before selection');
+    return rows.length?`<details class="summary"><summary>${label} · ${num(rows.length)}</summary>${table(['SKU',t('手册写法','Manual description'),t('商城写法','Store description')],rows)}</details>`:'';
+  }
+  function documentState(value){
+    return ({parsed:t('已筛查，有目标内容','Screened, relevant sections found'),empty:t('已筛查，未检出目标内容','Screened, no relevant sections found'),unread:t('未查全','Unchecked or incomplete'),failed:t('读取失败','Failed')})[value]||value||'';
+  }
+  function sourceReason(value){
+    const scope={otherResourceType:t('其他文件类型或网站入口','Other resource types or site landing pages'),otherPublisher:t('第三方发布者','Third-party publisher'),publisherTerms:t('发布方限制自动采集','Publisher restricts automated collection'),robotsDisallow:t('站点规则禁止采集','Disallowed by site rules'),unverifiedSiteRules:t('未能核对站点抓取规则','Site collection rules could not be verified'),unverifiedPublicRepository:t('未能确认该仓库公开','Repository could not be verified as public'),ocr_partial:t('仅部分扫描页完成文字筛查','Scanned pages only partially screened'),document_model_conflict:t('附件与商品的型号或配置有冲突','Attachment and product model or configuration disagree')};
+    if(scope[value])return scope[value];
+    if(value==='publisher_terms')return t('发布者条款限制自动采集','Publisher terms restrict automated collection');
+    if(value==='section_needs_review')return t('识别到目标栏目，其行或适用范围仍待核对','Target section found; rows or scope need review');
+    if(value==='protected_pdf')return t('受保护的 PDF','Protected PDF');
+    if(value==='ocr_candidate_needs_review')return t('扫描内容已识别，待人工复核','Scanned text recognized, awaiting review');
+    if(/^unreadable_|^pdf_text_/.test(value))return t('文档解析失败','Document parser failed');
+    const labels={excluded_robots:t('站点抓取规则限制','Excluded by crawler rules'),robots_unverified:t('暂时无法核对站点抓取规则','Crawler rules temporarily unavailable'),external_not_checked:t('第三方资源','External resource'),other_resource_type:t('非 Wiki 或 PDF','Other resource type'),host_cooldown:t('官网限流冷却','Source rate limit'),github_rate_limit:t('GitHub 速率限制','GitHub rate limit'),redirect_other_host:t('跳转到其他主机','Redirects to another host'),limit_bytes:t('超出单份文档大小限制','File exceeds processing size limit'),not_yet_checked:t('等待核对','Awaiting review'),network:t('网络读取失败','Network error'),encrypted_pdf:t('加密 PDF','Encrypted PDF'),no_text_layer:t('缺少可读取的文字层','No readable text layer'),long_pdf:t('超过单份文件页数限制','Exceeds page processing limit'),no_wiki_article:t('未找到对应 Wiki 正文','Wiki article not found'),not_pdf:t('链接返回的不是 PDF','Linked response is not a PDF'),pdf_text_KeyError:t('PDF 文本层解析失败','Failed to parse PDF text'),unreadable_LimitReachedError:t('PDF 读取超出解析限制','PDF parser limit reached')};
+    return labels[value]||(/^http_\d+$/.test(value)?value.replace('http_','HTTP '):value);
+  }
+  function sectionNames(){
+    return {product_feature_description:t('特性','Features'),specification:t('技术规格','Specifications'),hardware_overview:t('硬件概览','Hardware overview'),product_application_description:t('应用','Applications'),documents:t('文档','Documents'),certification_info:t('认证栏目','Certification section'),certification_info_tech:t('技术参数附表','Technical details'),certification_info_part:'Part List',certification_info_eccn:t('ECCN 等编码','ECCN and other codes'),faq_list:'FAQ'};
+  }
+  function pageException(p){
+    const audit=p.detailAudit||{},error=audit.error||'';
+    if(audit.identity?.reason==='different_displayed_sku')return t('网页实际展示其他 SKU','Page displays a different SKU');
+    if(audit.identity?.reason==='different_product_id')return t('网页展示不同的商品 ID','Page displays a different product ID');
+    if(error==='DETAIL_SKU_NOT_VERIFIED')return t('网页未能确认该 SKU，未采用页面详情','Page did not confirm this SKU; page details were omitted');
+    if(/^STORE_HTTP_\d+$/.test(error))return 'HTTP '+error.slice(11);
+    if(error==='ROBOTS_EXCLUDED'||audit.state==='excluded')return t('官网抓取规则或可用地址限制','Collection rules or available URL prevent access');
+    if(error==='ROBOTS_UNVERIFIED')return t('未能核实官网抓取规则','Store crawler rules could not be verified');
+    return error||t('商品页未能读取','Product page could not be read');
+  }
+  function landingEvidence(p){
+    const info=p.detailAudit?.identity;
+    if(!info)return '';
+    const shown=(info.displayedSkus||[]).map(sku=>{
+      const item=search.bySku.get(String(sku).toLowerCase());
+      return item?productLink(item):h(sku);
+    });
+    const fields=[];
+    if(shown.length)fields.push(t('页面 SKU','Displayed SKU')+' '+shown.join(', '));
+    if(info.displayedStoreIds?.length)fields.push(t('页面商品 ID','Displayed product ID')+' '+h(info.displayedStoreIds.join(', ')));
+    if(info.resolvedUrl)fields.push(link(info.resolvedUrl,t('查看跳转后的官网页面 ↗','Open final store page ↗')));
+    return fields.join(' · ');
+  }
+  function productReview(p){
+    const a=p.detailAudit;
+    if(!a)return '';
+    const labels=sectionNames(),status={empty:t('已查为空','Checked empty'),present:t('已查有内容','Checked, content present'),unread:t('尚未核对','Unchecked'),excluded:t('官网规则或链接限制','Excluded by rules or URL'),source_error:t('读取失败','Read failed')};
+    const explain={source_error:t('商品页读取失败或未能验证此 SKU。','The page could not be read or its SKU could not be confirmed.'),excluded:t('此次页面检查受官网抓取规则或可用 URL 限制。','The store policy or the available URL precluded a page check.'),unread:t('本轮尚未完成此商品页核对。','The full page has not been checked in this review.'),nonempty:t('本轮已核对十个独立栏目，至少一项有内容。','All ten dedicated sections were checked; at least one has content.'),empty:t('本轮已核对十个独立栏目，各栏均未列内容。','All ten dedicated sections were checked and were empty.')};
+    const data=[[t('商品目录正文','Catalogue product description'),h(status[a.body]||status.unread)]];
+    for(const [code,state] of Object.entries(a.fields||{}))data.push([h(labels[code]||code),h(status[state]||state)]);
+    const exception=['source_error','excluded'].includes(a.state)?`<p class="caption">${h(pageException(p))} ${landingEvidence(p)}</p>`:'';
+    return `<details class="summary"><summary>${t('本轮商品资料核对','Review of this product')}</summary><p class="caption">${h(explain[a.state]||'')} ${h((a.checkedAt||a.bodyCheckedAt||'').slice(0,10))}</p>${exception}${table([t('来源栏目','Source section'),t('状态','Status')],data)}</details>`;
   }
   function renderAssistant(){
     const result=search.lookup(state.query),p=state.pin?search.bySku.get(state.pin.toLowerCase()):result.primary;
@@ -253,6 +432,102 @@
     else view.scrollIntoView({block:'start'});
   }
   function syncChat(){window.WorkbenchChat?.sync();}
+  function collectionReport(){
+    const audit=base.audit;
+    if(!audit)return '';
+    const directory=audit.directory,detail=audit.detail,sm=audit.sitemap;
+    const heading=t('最近一次全站核对','Latest full-catalogue review');
+    const sourceNames={listing:t('公开商品接口','Public product endpoint'),sitemap:t('站点地图','Sitemap'),robots:t('抓取规则','Crawler rules')};
+    const sourceLinks=Object.entries(sourceNames).map(([key,name])=>link(audit.sources?.[key],name+' ↗')).filter(Boolean).join(' · ');
+    const menuStates={nonempty:0,empty:0,source_error:0,excluded:0,unread:0};
+    for(const p of base.products)if(p.groups?.length)menuStates[p.detailAudit?.state||'unread']++;
+    const rows=[
+      [t('海外公开搜索返回的不同 SKU','Distinct SKUs in public product search'),directory.publicSearchSkuCount],
+      [t('由其他官网入口确认的 SKU','SKUs confirmed through additional store routes'),directory.liveSkuCount-directory.publicSearchSkuCount],
+      [t('地图留档且普通商品页返回 HTTP 404','Sitemap records whose product pages returned HTTP 404'),base.products.filter(p=>p.catalogStatus==='live_secondary'&&p.storePageStatus==='not_found').length],
+      [t('可检索 SKU 中有正数起价 / 地图留档有历史价格','Searchable SKUs with a positive starting price / priced sitemap records'),num(base.products.filter(p=>p.catalogStatus==='live'&&p.price>0).length)+' / '+num(base.products.filter(p=>p.catalogStatus==='live_secondary'&&p.price>0).length)],
+      [t('仅通过菜单发现的 SKU','Menu-only SKUs'),directory.menuOnly?.length],
+      [t('本次新增 / 旧记录本次未返回','New / retained from previous catalogue'),num(directory.addedSkuCount)+' / '+num(directory.retainedPrevious)],
+      [t('站点地图链接 / 含商品 ID 的不同链接','Sitemap URLs / URLs containing a product ID'),num(sm.urls)+' / '+num(sm.productUrls)],
+      [t('地图中不同商品 ID / 尚无相同目录 URL ID','Distinct product IDs in sitemap / IDs absent from catalogue URLs'),num(sm.productIds)+' / '+num(sm.unmatchedProductIdCount)],
+      [t('正文已读且有内容 / 官网正文为空','Descriptions checked with text or media / checked empty'),num(directory.body?.present)+' / '+num(directory.body?.empty)],
+      [t('完整详情十个栏目均已核对','SKUs with all ten dedicated sections checked'),detail.checked],
+      [t('十个栏目中有内容 / 全部为空','At least one nonempty section / all ten empty'),num(detail.nonempty)+' / '+num(detail.empty)],
+      [t('官网抓取规则或网址限制 / 读取失败 / 尚未查全','Excluded by rules or URL / failed / not fully checked'),[detail.excluded,detail.source_error,detail.unread].map(num).join(' / ')],
+      [t('Products 菜单内的不重复 SKU：详情有内容 / 为空 / 失败 / 排除 / 待查','Unique SKUs in the Products menu: nonempty details / empty / failed / excluded / unchecked'),Object.values(menuStates).map(num).join(' / ')]
+    ];
+    if(audit.images){
+      const im=audit.images;
+      rows.push([t('可用主图 SKU / 不同 JPG 文件','SKUs with a verified local photo / distinct JPEGs'),num(im.verifiedSkus)+' / '+num(im.verifiedFiles)],
+        [t('官网未提供有效主图 / 有图源但未能取得','Missing valid store photo / source unavailable'),num(im.missingSourceSkus)+' / '+num(im.failedSkus)]);
+    }
+    const d=audit.documents;
+    let documentReport='';
+    if(d){
+      const kinds={wiki:'Wiki',pdf:'PDF',spreadsheet:t('清单工作表','List spreadsheets'),catalogue:t('官方年度目录','Official annual catalogue'),reference:t('其他链接资源','Other linked resources')};
+      documentReport=`<h3>${t('Wiki、PDF 与其他链接','Wiki, PDFs and linked resources')}</h3><p class="caption">${h(t('共发现 '+num(d.uniqueLinked)+' 个不同地址，已筛查 '+num(d.uniqueChecked)+' 个来源的可读正文。仅对可确认归属的型号使用文档条目。',num(d.uniqueLinked)+' distinct URLs were identified. Readable content was screened in '+num(d.uniqueChecked)+' sources. Findings are assigned only where their model scope can be verified.'))}</p>`+
+        table([t('来源类型','Source type'),t('已筛查有目标内容','Screened, target sections found'),t('已筛查无目标内容','Screened, no target sections'),t('未查全','Incomplete'),t('读取失败','Failed')],Object.entries(d.byKind||{}).map(([key,v])=>[h(kinds[key]||key),num(v.parsed),num(v.empty),num(v.unread),num(v.failed)]));
+      const allowed=d.officialScopeSummary;
+      if(allowed){
+        const excluded=Object.entries(allowed.excludedByReason||{});
+        documentReport+=`<h3>${t('可自动核对的官方资料','Official sources eligible for automated review')}</h3><p class="caption">${t('按不同来源网址统计。发布方、文件类型与公开访问规则决定是否纳入；单份文件返回错误或无法读完时，保留在应核范围内。','Counts use distinct source URLs. Publisher, resource type and public access rules define the scope. Individual file errors and incomplete reads remain in scope.')}</p>`+
+          table([t('核对范围与结果','Scope and outcome'),t('来源数','Sources')],[
+            [t('全部关联网址','All linked URLs'),num(allowed.linked)],[t('仅保留链接，范围外或发布方有限制','Link only: outside scope or restricted by the publisher'),num(excluded.reduce((n,[,count])=>n+count,0))],
+            [t('应核的官方资料','Eligible official resources'),num(allowed.eligible)],[t('其中已完成目标内容筛查','Completed target-content screening'),num(allowed.completed)],
+            [t('其中已尝试、未能完成','Attempted and incomplete'),num(allowed.attemptedIncomplete)],[t('其中尚未尝试','Not attempted'),num(allowed.notAttempted)],
+            [t('其中旧记录未确认是否已对该地址发起请求','Earlier records without confirmed per-URL attempts'),num(allowed.attemptUncertain)]
+          ]);
+        if(excluded.length)documentReport+=`<details class="summary"><summary>${t('查看仅保留链接的原因','View reasons for link-only coverage')}</summary>${table([t('原因','Reason'),t('来源数','Sources')],excluded.map(([reason,n])=>[h(sourceReason(reason)),num(n)]))}</details>`;
+        const pending=Object.entries(allowed.byOutcomeAndReason?.attemptedIncomplete||{}).sort((a,b)=>b[1]-a[1]);
+        if(pending.length)documentReport+=`<details class="summary"><summary>${t('查看已尝试但未读完的原因','View reasons for incomplete attempts')}</summary>${table([t('原因','Reason'),t('来源数','Sources')],pending.map(([reason,n])=>[h(sourceReason(reason)),num(n)]))}</details>`;
+        if(allowed.originalReadUnion!==undefined)documentReport+=`<p class="caption">${h(t('取得线上原件 '+num(allowed.onlineBodyRetrieved)+' 个，读取已固定版本的官方 Wiki 正文 '+num(allowed.offlineOriginalRead)+' 个。合计 '+num(allowed.originalReadUnion)+' 个不同地址至少取得一种原文。','Online originals were retrieved for '+num(allowed.onlineBodyRetrieved)+' URLs, and '+num(allowed.offlineOriginalRead)+' Wiki originals were read from the pinned official revision. Together these cover '+num(allowed.originalReadUnion)+' unique URLs.'))}</p>`;
+      }
+      documentReport+=`<p class="caption">${h(t(num(d.verifiedSkus)+' 个 SKU 有 '+num(d.verifiedRows)+' 条可确认归属的来源记录，包含不同资料对同一物料的交叉核对。',num(d.verifiedRows)+' scoped source records across '+num(d.verifiedSkus)+' SKUs include independent confirmations of the same item.'))}</p>`;
+      if(d.sourcesWithSkuFacts!==undefined)documentReport+=table([t('文档证据口径','Document evidence measure'),t('数量','Count')],[
+        [t('可为明确 SKU 提供事实的不同来源','Distinct sources with SKU-specific or verified family facts'),num(d.sourcesWithSkuFacts)],
+        [t('不重复的主 SKU 与配件 SKU 组合','Distinct host SKU and accessory SKU pairs'),num(d.distinctAccessorySkuPairs)],
+        [t('有文档装箱明细的主 SKU','Host SKUs with documented package contents'),num(d.skusWithDocumentPackingRows)],
+        ...(d.wikiSeriesServiceSkus!==undefined?[[t('已获 Wiki 具体定制服务依据的 SKU / 系列指南','SKUs with specific Wiki customization evidence / family guides'),num(d.wikiSeriesServiceSkus)+' / '+num(d.targetedWikiServiceGuides)]]:[])
+      ]);
+      if(d.pdfTextPages!==undefined){
+        const fingerprinted=d.pdfTextPagesWithoutDigest!==undefined;
+        const pages=fingerprinted?t('按文件指纹去重后的 PDF 文字层筛查覆盖 '+num(d.pdfTextPages)+' 页。另有 '+num(d.pdfTextFilesWithoutDigest)+' 个早期来源，共 '+num(d.pdfTextPagesWithoutDigest)+' 页次，已筛查但无法跨链接去重。','Text screening covered '+num(d.pdfTextPages)+' pages after file-hash deduplication. A further '+num(d.pdfTextPagesWithoutDigest)+' page reads across '+num(d.pdfTextFilesWithoutDigest)+' earlier sources lack hashes for cross-link deduplication.'):t('本阶段记录 PDF 文字层筛查 '+num(d.pdfTextPages)+' 页次，文件别名可能重复。','This stage recorded '+num(d.pdfTextPages)+' PDF page reads, which may include files linked under several URLs.');
+        documentReport+=`<p class="caption">${h(pages+' '+t('扫描页经 OCR 识别到文字 '+num(d.pdfOcrPagesWithText)+' 页。','OCR found text on '+num(d.pdfOcrPagesWithText)+' scanned pages.'))}</p>`;
+      }
+      const reasons=Object.entries(d.unreadAndFailureReasons||{}).sort((a,b)=>b[1]-a[1]);
+      if(reasons.length)documentReport+=`<details class="summary"><summary>${t('范围限制与异常原因','Scope limits and source exceptions')}</summary>${table([t('原因','Reason'),t('不同来源数','Distinct sources')],reasons.map(([k,v])=>[h(sourceReason(k)),num(v)]))}</details>`;
+      if(d.publishedUnmatchedSkus?.length){
+        const printed=d.publishedUnmatchedSkus.map(item=>[h(item.sku),(item.pageUrls||[item.source]).map((url,index)=>link(url,t('文件第 '+item.pages[index]+' 页 ↗','File page '+item.pages[index]+' ↗'))).join(' · ')]);
+        const lookup=audit.supplementarySkuLookup;
+        const scope=lookup?.requested?.length?`<p class="caption">${h((lookup.checkedAt||'').slice(0,10))} · ${h(t('官网对 '+lookup.requested.length+' 个货号的精确筛选返回 '+lookup.totalCount+' 个商品。','An exact store search for '+lookup.requested.length+' SKUs returned '+lookup.totalCount+' products.'))} ${link(lookup.source,t('查询来源 ↗','Search source ↗'))}</p>`:'';
+        documentReport+=`<details class="summary"><summary>${t('年度目录列出、尚未匹配商城商品的 SKU','Annual catalogue SKUs without a verified store record')} · ${num(printed.length)}</summary>${scope}${table(['SKU',t('年刊原文','Annual catalogue')],printed)}</details>`;
+      }
+      const repo=audit.wikiRepository;
+      if(repo)documentReport+=`<p class="caption">${h(t('另核对 '+num(repo.read)+' 份官方英文 Wiki 源文件。'+num(repo.purchasePages??repo.pages)+' 页的购买链接与 '+num(repo.purchaseSkus??repo.matchedSkus)+' 个目录 SKU 核对一致。',num(repo.read)+' English Wiki source files were checked. Purchase links on '+num(repo.purchasePages??repo.pages)+' Wiki pages matched '+num(repo.purchaseSkus??repo.matchedSkus)+' store SKUs.'))} ${repo.verifiedDeclaredPages?h(t('其中另核对了 '+num(repo.verifiedDeclaredPages)+' 页明确声明的 SKU 及型号，共 '+num(repo.verifiedDeclaredSkus)+' 个不同 SKU。','Explicit SKU metadata and titles on '+num(repo.verifiedDeclaredPages)+' pages matched '+num(repo.verifiedDeclaredSkus)+' distinct SKUs.')):''} ${link(repo.repository+'/tree/'+repo.revision,t('官方 Wiki 版本 ↗','Official Wiki revision ↗'))}</p>`;
+    }
+    const labels=sectionNames();
+    const perField=Object.entries(audit.fields||{}).map(([key,value])=>[h(labels[key]||key),num(value.present),num(value.empty),num(value.source_error),num(value.excluded),num(value.unread)]);
+    const candidates=sm.priorUnmatchedProductCandidates||sm.legacyProductCandidates||[];
+    const exceptionRows=candidates.map(item=>[h(item.id),link(item.url,t('地图地址 ↗','Sitemap URL ↗')),h(item.sku||''),h(routeStatus(item.redirectCode?'redirect':item.state))+(item.redirectCode?' '+h(item.redirectCode):'')]);
+    const pageExceptions=base.products.filter(p=>['source_error','excluded'].includes(p.detailAudit?.state));
+    const exceptionGroups=new Map();
+    for(const p of pageExceptions){
+      const reason=pageException(p);
+      if(!exceptionGroups.has(reason))exceptionGroups.set(reason,[]);
+      exceptionGroups.get(reason).push(p);
+    }
+    const pageReport=Array.from(exceptionGroups,([reason,products])=>`<details class="summary"><summary>${h(reason)} · ${num(products.length)} SKU</summary>${table(['SKU',t('产品','Product'),t('官网','Store')],products.map(p=>[productLink(p),h(p.name),link(p.url,t('查看来源 ↗','View source ↗'))]))}</details>`).join('');
+    return `<section class="panel padded"><h2>${h(heading)}</h2><p class="caption">${h((audit.checkedAt||'').slice(0,10))} · ${sourceLinks}</p>`+
+      table([t('核对项目','Review item'),t('数量','Count')],rows.filter(([,v])=>v!==undefined).map(([key,value])=>[h(key),typeof value==='number'?num(value):h(value)]))+
+      (pageExceptions.length?`<details class="summary"><summary>${t('查看读取失败或受限的商品页','View failed or excluded product pages')} · ${num(pageExceptions.length)} SKU</summary>${pageReport}</details>`:'')+
+      `<details class="summary"><summary>${t('按商品详情栏目查看','View checks by product-page section')}</summary>${table([t('官网栏目','Store section'),t('有内容','Nonempty'),t('已查为空','Checked empty'),t('读取失败','Failed'),t('规则排除','Excluded'),t('未检查','Unchecked')],perField)}</details>`+
+      (candidates.length?`<details class="summary"><summary>${h(t('查看商品 ID 对账明细','View sitemap product ID reconciliation'))}</summary>${table([t('商品 ID','Product ID'),t('官网','Store'),'SKU',t('核对状态','Review status')],exceptionRows)}</details>`:'')+
+      documentReport+'</section>';
+  }
+  function routeStatus(code){
+    const labels={unread:t('尚未核对','Unchecked'),excluded:t('规则限制','Excluded by policy'),homepage:t('商城首页','Homepage'),redirect:t('重定向','Redirect'),product:t('官网商品','Store product'),resolved_product:t('已确认商品','Confirmed product'),resolved_nonproduct:t('已确认为其他类型页面','Confirmed non-product page'),no_route:t('官网查询无匹配','No match in public routing'),missing:t('无匹配路由','No matched route')};
+    return labels[code]||code||'';
+  }
   function renderCoverage(){
     const s=db.stats;
     const attributeCounts={present:0,empty:0,unparsed:0,unread:0};
@@ -264,11 +539,25 @@
     }
     const cards=[[s.total,t('公开目录 SKU','Store SKUs')],[s.menu,t('菜单内 SKU','SKUs in menu')],[db.categories.length,t('一级分类','Menu categories')],[s.images,t('有本地主图的 SKU','SKUs with a local image')]];
     view.innerHTML=title(t('采集概况','Catalogue coverage'),t('下列统计对应海外商城基础数据，本地新增与编辑另行保存。','These totals describe the official base catalogue. Local additions and edits are saved separately.'))+
-      `<div class="metrics">${cards.map(([v,l])=>`<div class="panel"><strong>${num(v)}</strong><small>${h(l)}</small></div>`).join('')}</div><div class="panel padded"><h2>${t('字段覆盖','Field coverage')}</h2>`+
-      table([t('字段','Field'),t('SKU 数量','SKUs')],[[t('商品 URL','Product URL'),s.urls],[t('正数公开起价','Positive starting price'),s.prices],[t('Part List 原表含属性','Attributes in a Part List section'),attributeCounts.present],[t('已查 Part List 未列属性','Checked Part List contains no attributes'),attributeCounts.empty],[t('Part List 属性原文待核','Part List attribute format requires review'),attributeCounts.unparsed],[t('Part List 尚未核对','Part List not yet checked'),attributeCounts.unread],[t('已另核的商品标题配置','Model configurations verified from store titles'),base.products.filter(p=>p.modelSpecs?.length).length],[t('已列出随箱物料','With in-box items'),s.parts],[t('文档链接','Document links'),s.documents],[t('已读详情专栏','Detail sections read'),s.sections],[t('官方 Wiki 资料或已核事实','Official Wiki links or findings'),s.wikiLinked],[t('有已核对的 Wiki 推荐依据','Verified model-specific Wiki findings'),s.wikiFacts]].map(([l,v])=>[h(l),num(v)]))+
+      `<div class="metrics">${cards.map(([v,l])=>`<div class="panel"><strong>${num(v)}</strong><small>${h(l)}</small></div>`).join('')}</div>`+collectionReport()+`<div class="panel padded"><h2>${t('当前本地可查询的字段','Fields available in the local snapshot')}</h2>`+
+      table([t('字段','Field'),t('SKU 数量','SKUs')],[
+        [t('有商城商品或回退链接','Store product or fallback URL'),s.urls],[t('已收录正数起价（含地图留档）','Recorded positive starting price, including sitemap records'),s.prices],
+        [t('Part List 原表含属性','Attributes in a Part List section'),attributeCounts.present],[t('已查 Part List 未列属性','Checked Part List contains no attributes'),attributeCounts.empty],
+        [t('Part List 属性原文待核','Part List attribute format requires review'),attributeCounts.unparsed],[t('Part List 尚未核对','Part List not yet checked'),attributeCounts.unread],
+        [t('另据官方标题或手册核实的型号配置','Model configurations verified from an official title or manual'),base.products.filter(p=>p.modelSpecs?.length).length],
+        [t('已提取技术规格表或清单','Extracted specification tables or lists'),s.specProducts??base.products.filter(p=>specCount(p)).length],
+        [t('已列出随箱物料','With in-box items'),s.parts],[t('已确认扩展接口或配件','Verified accessories or expansion interfaces'),base.products.filter(p=>p.accessories?.some(a=>!storeOffer(a))).length],
+        [t('商品页列有商城加购推荐','Products with store add-on offers'),base.products.filter(p=>p.accessories?.some(storeOffer)).length],
+        [t('商品页的文档链接','Resources from store pages'),s.documents],[t('存有本轮或以往的商品页详情','Product-page details saved across all reviews'),s.sections],
+        [t('官方 Wiki 资料或已核事实','Official Wiki links or findings'),s.wikiLinked],[t('使用已核对的 Wiki 推荐依据','Curated Wiki selection findings'),s.wikiFacts],
+        [t('有明确归属的文档条目','Verified, scoped document entries'),base.products.filter(p=>p.verifiedDocumentRows?.length).length]
+      ].map(([l,v])=>[h(l),num(v)]))+
       (reviewRows?`<p class="caption">${h(t(num(reviewProducts)+' 个 SKU 有 '+num(reviewRows)+' 行官网原文待归类，可在这些产品的「原表待核」查看。',num(reviewRows)+' source rows across '+num(reviewProducts)+' SKUs await classification. Open “Rows to review” on those products.'))}</p>`:'')+
       `</div><div class="panel padded"><h2>${t('Products 分类','Products categories')}</h2><p class="caption">${t('同一个 SKU 可能出现在多个分类。','A SKU may appear in multiple categories.')}</p>`+
-      table([t('分类','Category'),'SKU',t('已读详情','Details read'),t('有官网属性','Store attributes'),t('有箱内清单','Packing list'),t('官网','Store')],db.categories.map(c=>[`<button class="textbtn" data-group="${h(c.name)}">${h(c.name)}</button>`,num(c.count),num(c.sections),num(c.attributes),num(c.parts),link(c.url,t('打开 ↗','Open ↗'))]))+'</div>';
+      table([t('分类','Category'),'SKU',t('本轮已读 / 可检查','Checked this review / eligible'),t('失败 / 排除 / 未查','Failed / excluded / unchecked'),t('历次有详情','Saved details'),t('有官网属性','Store attributes'),t('有箱内清单','Packing list'),t('官网','Store')],db.categories.map(c=>{
+        const v=c.thisRunPages;
+        return [`<button class="textbtn" data-group="${h(c.name)}">${h(c.name)}</button>`,num(c.count),v?num(v.checked)+' / '+num(v.eligible):'',v?[v.source_error,v.excluded,v.unread].map(num).join(' / '):'',num(c.sections),num(c.attributes),num(c.parts),link(c.url,t('打开 ↗','Open ↗'))];
+      }))+'</div>';
   }
   function render(){
     if(state.view!=='assistant'){currentProduct=null;currentAlternatives=[];}
@@ -282,7 +571,7 @@
   }
   function runQuery(q){
     state.query=q.trim();state.pin='';state.accFilter=/eu868/i.test(q)?'EU868':/us915/i.test(q)?'US915':'';
-    state.tab=/随箱|装箱|箱内|in the box|pack(?:ing|age) (?:list|contents)/i.test(q)?'parts':/属性|规格|内存|存储|specifications|attributes|\bstorage\b|\bram\b/i.test(q)?'attributes':state.accFilter||/配件|扩展|wi[ -]?fi|无线网卡|accessor/i.test(q)?'accessories':/定制|logo|customiz/i.test(q)?'notes':'';
+    state.tab=/随箱|装箱|箱内|in the box|pack(?:ing|age) (?:list|contents)/i.test(q)?'parts':/规格|specifications?/i.test(q)?'specs':/属性|内存|存储|attributes|\bstorage\b|\bram\b/i.test(q)?'attributes':state.accFilter||/配件|扩展|wi[ -]?fi|无线网卡|accessor/i.test(q)?'accessories':/定制|logo|customiz/i.test(q)?'notes':'';
     state.view='assistant';history.replaceState(null,'','#assistant');render();
   }
   function route(){
@@ -322,7 +611,8 @@
     const field=el(id);field.focus();field.setSelectionRange(pos,pos);
   });
   async function start(){
-    if(location.protocol!=='file:'){
+    if(publicPreview){lang=new URLSearchParams(location.search).get('lang')==='en'?'en':'zh-CN';}
+    else if(location.protocol!=='file:'){
       try{profile=await api('/api/state');lang=profile.language==='en'?'en':'zh-CN';connected=true;}
       catch{connected=false;}
     }

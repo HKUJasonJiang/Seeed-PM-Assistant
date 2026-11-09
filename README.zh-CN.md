@@ -27,11 +27,23 @@
 
 ### 随附目录覆盖到哪里
 
-**2026 年 11 月 8 日**的快照收录海外公开商城 **4,499 个不同 SKU**，其中 **1,776 个**已匹配到本次核对的 15 个菜单品类。其他 SKU 也可以搜索。**4,494 个**有正数公开起价，**4,467 个**有本地主图，**2,829 个**有一项或以上的随箱物料，**959 个**有文档链接。另有 **395 个**读取到详细产品专栏。更新后请以「采集概况」中的本机数字为准。
+**2026 年 11 月 9 日**核对了三个官网入口。海外商城公开搜索返回 **4,499 个 SKU**，其中 **1,776 个**出现在 15 个 Products 菜单品类中。站点地图与官网商品路由另返回 **22 个 SKU**，逐一访问其普通商城页均返回 HTTP 404。工作台保留这些地图记录以便查手册，报价前需另行核实价格和供货。合并后可搜索 **4,521 个不同 SKU**。
+
+打开「采集概况」可查看核对日期、官网来源、商品页和文档的已查、有内容、空白、失败及排除数量。商品目录正文与商品页的十个独立栏目分别统计。该页也列出历次核对后本地可查的字段、主图和地图对账明细。[打开本地采集概况](http://127.0.0.1:8765/#coverage) · [官网站点地图](https://www.seeedstudio.com/sitemap.xml)
+
+**2026 年 11 月 9 日**逐一访问了 **4,479** 个允许检查的商品页入口，**4,436** 个能核实 SKU 及全部十个栏目。其中 4,370 个至少一栏有内容，66 个十栏均空。另外 43 个入口中，27 个返回 HTTP 404、11 个显示其他 SKU、1 个跳回首页、4 个跳出允许范围。另有 42 个受站点规则或回退地址限制。本地主图覆盖 4,467 个 SKU，共 3,888 张不重复的 JPG。商品页无法打开时，仍可查看公开目录已提供的名称、标价和其他字段。
+
+54 个没有本地主图的产品中，34 个缺少可用的官方图源，20 个有官网图源但未能核实图片站点的抓取规则，仍可在「文档与来源」点击原图。商城加购推荐与有文档依据的配件、扩展接口分开展示。例如 R1125-10 有 25 项手册记录，另外还有 2 个商城加购项。[在本机查看 R1125-10](http://127.0.0.1:8765/#product=113991334&tab=accessories)
+
+本轮发现 **12,939 个不同的资料网址**。其中 3,297 个因来源、类型或访问限制仅保留链接。**9,642 个应核的官方资料网址均已尝试**，**7,290 个完成目标内容筛查**，**2,352 个未能读全**。其中 969 份受文件保护、939 份无可用文字层、62 份仅部分 OCR、212 个文件不存在、150 个拒绝访问，其余 20 个有其他来源问题。另对可能涉及报价的 9 份扫描件逐页查看了 187 页。例如 `110991984` 官网箱单写螺丝 4 颗，装配步骤 4 标注用量为 6 颗，工作台并列展示两处原文。[在本机查看螺丝用量对照](http://127.0.0.1:8765/#product=110991984&tab=parts)
+
+最终快照有 3,820 款商品具备结构化规格、2,943 款具备随箱行、1,234 款关联官方 Wiki。3,470 款有关联资料，其中 3,068 款至少有一份来源完成筛查。可确认适用型号的文档贡献了 **205 款商品的 2,922 条来源记录**，含 622 组不同的主机与配件 SKU 关系。同一物料若在不同版本、安装步骤或系列手册中的说法有差异，可以分别查到适用范围与原文。[查看含 40 个可点模组 SKU 及原工作表行号的 Grove 套装](http://127.0.0.1:8765/#product=110020230&tab=parts)
 
 - 空白表示还没有可展示的值。界面会区别「已查栏目未列出」「尚待核对」和「原表待核」。定制范围为空时，可以向工程或产品同事确认可行性。
 - 商城的 *Part List* 有时是规格表。工作台会分开展示能辨认的官网属性与箱内清单，并保留来源。请看依据适用于具体 SKU 还是整个系列。原文没给数量时，数量栏留空。选配清单中的物料需另核是否随箱。
 - 每个 SKU 最多使用一张目录主图，完全相同的 JPG 共用一份文件。Wiki、附件和 PDF 点击后访问发布方网站，有页码依据的链接会定位到相应的文件页。商品、库存和手册都有可能晚于本地快照更新。
+
+在「技术规格」中可查看官网原表中的型号列、技术参数和硬件概览入口。「文档与来源」会标记官方 Wiki 的购买链接、各文档核对结果和可定位的 PDF 文件页。例如 EdgeLogix 的 SKU `102110773` 在官方手册第 17 页对应 8GB RAM 与 32GB eMMC。[在本机查看此型号](http://127.0.0.1:8765/#product=102110773&tab=attributes) · [Seeed 手册第 17 页](https://files.seeedstudio.com/wiki/raspberry-pi/seeed-studio-raspberry-pi-series-catalog-v1.1.pdf#page=17)
 
 ## 可选的 AI 对话
 
@@ -48,6 +60,35 @@
 3. 看进度和两个时间。「上次检查官网」是成功检查目录的时间，「上次成功写入商品」是新资料实际写入本机的时间。遇到网站限速，请等到界面标示的「可续跑时间」，再点「续跑上次任务」。任务暂存期间仍可查原目录。
 
 更新依赖商城公开接口、网页结构和可访问的文档。网页改版后部分字段可能仍需核对。手册换版后，请重新核对原文与引用页码。
+
+<details>
+<summary>供目录维护人员使用 · 复现一次全站核对</summary>
+
+每个采集日期使用独立临时文件夹。运行期间员工可继续使用原工作台。普通商品页按官网抓取规则逐一读取。任务中断或收到 HTTP 429 时，已经完成的 SKU 会保留在临时目录中，等到可重试时间后执行同一步即可续跑。以下命令在解压后的项目目录中用 PowerShell 运行。
+
+```powershell
+$reviewDir = Join-Path $env:TEMP "seeed-public-review"
+$docDir = Join-Path $reviewDir "documents"
+$pythonExe = ".\.venv\Scripts\python.exe"
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --reconcile
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --pages
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --assemble
+& $pythonExe -m backend.bulk_catalog --stage $reviewDir --references
+& $pythonExe -m backend.document_enrichment --catalog "$reviewDir\catalog.js" --links "$reviewDir\document-links.json" --output $docDir --discovered --global-catalog
+& $pythonExe -m backend.document_merge --catalog "$reviewDir\catalog.js" --output $docDir
+& $pythonExe -m backend.catalog_release --stage $reviewDir --documents $docDir --output "$reviewDir\reviewed\catalog.js"
+```
+
+维护电脑解析 PDF 时需要 Poppler 的 `pdftotext` 或 `pypdf`。从英文 Wiki 的购买入口补商品关联时，可用官方 Markdown 源码和 `backend.wiki_purchases`、`backend.document_wiki` 两个模块，版本号与文件映射参数请看各模块的 `--help`。结果先写入临时目录。分发新快照前应核对统计、例外、样品 SKU 和新增 JPG；完成发布及核验后可清理临时目录。
+
+核对通过后，先让正在进行的更新任务结束，并停止此目录的助手。运行 `& $pythonExe -m backend.catalog_release --stage $reviewDir --install-reviewed "$reviewDir\reviewed\catalog.js"`，再重启助手。安装时会核对原目录的文件指纹、本轮完成情况及每张本地主图，再替换公开目录。个人资料保存在单独的文件夹中。
+
+文档深度核对与开发者页的日常目录更新分开运行。`backend.document_enrichment` 的 `--verify-digests` 可重新核对早期缺少文件指纹的资料。Windows 上可将 Poppler 的 `pdftoppm.exe` 完整路径传给 `--ocr-scans`，并用 `--ocr-max-pages` 设置每份文件的文字识别页数上限。确认的条目保留原文链接与页码。
+
+维护人员若已经登录 GitHub CLI，可以在文档核对命令中选择 `--host api.github.com --github-cli`。脚本使用当前账号的官方 API 额度，只读取已确认公开的 Seeed 仓库，并用 GitHub 提供的文件指纹验证内容。日常使用工作台无需 GitHub CLI 或 GitHub 账号。
+
+</details>
 
 ## 备份、升级工作台与换机
 
@@ -71,4 +112,4 @@
 | 收藏或定制项目似乎不见了 | 确认浏览器地址对应本次启动器打开的本地端口，并检查所用 Windows 账户及解压目录。每个安装目录单独保存个人资料。 |
 | AI 回答失败、产品资料缺失 | 检查已选的模型、供应商和密钥。产品信息可以直接打开商城 URL 或资料出处核对，在「采集概况」查看覆盖范围，或单独刷新该 SKU。 |
 
-目录资料来自 Seeed 海外商城与官方 Wiki。商品图片、商标、链接文档等遵循各自权利人的使用条款。如需公开转载素材或向团队外再分发本软件，请先向相应权利人确认授权。[Seeed 海外商城](https://www.seeedstudio.com/) · [Seeed Studio Wiki](https://wiki.seeedstudio.com/)
+目录资料来自 Seeed 海外商城与官方 Wiki。商品图片、商标及链接文档遵循各自权利人的使用条款。通过英文 Wiki 购买按钮建立的关联附有本轮核对的官方源码版本。再分发素材前请查阅相应发布者的授权信息。[Seeed 海外商城](https://www.seeedstudio.com/) · [Seeed Wiki 授权信息](https://wiki.seeedstudio.com/License/) · [本轮英文 Wiki 源码版本](https://github.com/Seeed-Studio/wiki-documents/tree/c9321cc04d695f7b89ed273908558854fe00ab50/sites/en/docs)

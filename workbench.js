@@ -311,11 +311,15 @@
   function warningText(code){
     const labels={NOT_IN_CURRENT_STORE:['本次检索未出现','Missing from the current store search'],NO_PRODUCT_URL:['没有可核实的商品页','No verified product page'],
       NO_NEW_SECTIONS:['商品页未返回详情专栏','No product detail sections returned'],IMAGE_FAILED:['主图未更新','Image update failed'],
+      ROBOTS_UNVERIFIED:['暂时无法核对官网抓取规则','The store crawler rules could not be verified'],ROBOTS_EXCLUDED:['官网规则排除了这个地址','Store rules exclude this URL'],
+      DETAIL_SKU_NOT_VERIFIED:['官网页面的 SKU 身份未核实','The SKU on the store page could not be verified'],STORE_HTTP_404:['此商品页返回 HTTP 404','The product page returned HTTP 404'],
       STORE_API_CHANGED:['官网返回的数据结构有变化','The store data structure changed']};
     return phrase(labels,code,L('原有资料已保留','Previous information preserved'))+(code?' ('+code+')':'');
   }
   function updateError(error) {
     const normalized=String(error?.code||error).toLowerCase();
+    if(normalized==='robots_unverified')return L('暂时无法核对官网抓取规则。任务已暂停，可在官网恢复后续跑。','The crawler rules could not be verified. The job has stopped and can resume when the source recovers.');
+    if(normalized==='store_http_403')return L('官网拒绝了本次访问。此前完成的资料已保留。','The store denied this request. Completed records remain available.');
     if(/429|limit|paused|cooldown/.test(normalized))return L('官网限速。已保存进度，可在冷却结束后续跑。','The official store requested a cooldown. Saved progress can be resumed afterwards.');
     if(/network|upstream|http|fetch|timeout|remote/.test(normalized))return L('官网数据暂时不可用，已保留上次目录。','The store is unavailable. The previous catalog is preserved.');
     if(/interrupt/.test(normalized))return L('上一次任务中断，可从已保存的位置续跑。','The previous job was interrupted. Resume from its saved checkpoint.');

@@ -430,6 +430,11 @@ sup {
 .table-scroll {
   overflow-x:auto;
 }
+.spec-shortcut {margin-top:8px}
+nav button[hidden],#developer-link[hidden] {display:none}
+.official-specs + .official-specs {margin-top:16px}
+.official-specs td,.official-specs th {min-width:6em;overflow-wrap:anywhere}
+.official-specs caption {text-align:left;font-weight:650;padding:8px 0}
 table {
   width:100%;
   border-collapse:collapse;
