@@ -4,6 +4,8 @@
 
 这个本地 Windows 工作台供 Seeed 项目经理查询**海外商城**。拿到客户需求后，可以按 SKU 或用途找产品，核对随箱物料、另购配件和地区型号，再把可定制的产品归入同一个需求。随附目录可以直接查询，无需 AI 密钥。
 
+**找不到收藏夹？** 浏览器地址是 `file:///…/index.html` 时，打开的是只读目录预览。请将下载包「全部解压」，回到含有 `index.html` 的文件夹，双击 **`启动助手.cmd`**（或 `Start Assistant.cmd`），使用启动器打开的浏览器页面。新电脑请先按下面的步骤安装。完整工作台左侧有「我的收藏」「定制服务」，左下有「开发者」，右下有 AI 聊天按钮。如果服务已在默认端口运行，可以直接打开收藏页。[在本机打开我的收藏](http://127.0.0.1:8765/#favorites)
+
 ## 第一次在 Windows 上安装
 
 1. **检查电脑和 Python。** 使用 Windows 10 或 11 的 x64 电脑和浏览器。打开「开始」，搜索 `cmd`，点「命令提示符」，输入 `py -3 --version` 或 `python --version`。如果已有 **64 位 CPython 3.12 或 3.13**，可直接跳到第 2 步。否则请 IT 安装。个人管理的电脑可在 Python 官网下载 3.13.x 的 **Windows installer (64-bit)**。在传统安装器的第一个界面勾选 **Add python.exe to PATH**，再点 **Install Now**。安装后新开一个命令提示符，重复上面的版本检查。若只打开微软应用商店，请联系 IT。[Windows 版 Python 下载](https://www.python.org/downloads/windows/) · [Python 官方安装说明](https://docs.python.org/3.13/using/windows.html)

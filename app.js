@@ -2,8 +2,9 @@
   'use strict';
   const view=document.getElementById('view');
   const publicPreview=Boolean(document.querySelector('meta[name="seeed-public-preview"]'));
+  const loopback=['127.0.0.1','localhost','[::1]'].includes(location.hostname);
   let base=window.SEEED_CATALOG;
-  if(!base){view.textContent='产品目录未载入。The catalogue could not be loaded.';return;}
+  if(!base){view.textContent='产品目录未载入。请使用「全部解压」，确认 data 文件夹与 index.html 位于同一目录。 The catalogue could not be loaded. Extract the whole ZIP and keep the data folder next to index.html.';return;}
   let db=base, search, currentProduct, currentAlternatives=[];
   let profile={language:'zh-CN',provider:'deepseek',providers:{},favorites:[],projects:[],overrides:{}};
   let lang='zh-CN', connected=false;
@@ -41,7 +42,7 @@
     if(!response.ok){const err=new Error(result.message||result.error||response.statusText);err.code=result.code||result.error;err.status=response.status;throw err;}
     return result;
   }
-  function rebuild(){db=mergeProductData(base,profile.overrides);search=createSearch(db,lang,p=>window.Workbench?.isEligible(p)??Boolean(p.custom||p.customConfirmed));}
+  function rebuild(){db=mergeProductData(base,profile.overrides);search=createSearch(db,lang,p=>connected?window.Workbench.isEligible(p):Boolean(p.custom||p.customConfirmed));}
   async function reloadData(reloadBase=false){
     if(reloadBase){
       const resp=await fetch('data/catalog.js',{cache:'no-store'});
@@ -57,24 +58,29 @@
   const snapLang=v=>{lang=v==='en'?'en':'zh-CN';profile.language=lang;rebuild();render();};
   const changeView=name=>{if(location.hash==='#'+name){state.view=name;render();}else location.hash=name;};
   const openProduct=sku=>{const target='#product='+encodeURIComponent(sku);if(location.hash===target)route();else location.hash=target;};
+  const workspaceLink=()=> 'http://127.0.0.1:8765/'+location.hash;
+  function previewGuide(){
+    const locale=lang==='en'?'zh-CN':'en';
+    const docs='https://github.com/HKUJasonJiang/Seeed-PM-Assistant/blob/main/'+(lang==='en'?'README.md':'README.zh-CN.md');
+    return `<section class="preview-guide" aria-labelledby="preview-heading"><div class="preview-guide-body"><h2 id="preview-heading">${t('当前是只读目录预览','You’re viewing the read-only catalogue')}</h2>`+
+      `<p>${t('在这里可以查产品。收藏、定制项目、AI 对话和开发者设置在完整工作台中。','You can look up products here. Favorites, customization projects, AI chat and Developer settings are in the full workbench.')}</p>`+
+      `<p>${t('首次使用，请将下载的 ZIP「全部解压」，回到含有 index.html 的文件夹，双击','For first use, extract the entire ZIP. In the folder containing index.html, double-click')} <strong>${t('启动助手.cmd','Start Assistant.cmd')}</strong>${t('，使用启动器打开的浏览器页面。',' and use the browser page opened by the launcher.')}</p></div>`+
+      `<div class="preview-guide-actions"><a class="workbench-link" href="${h(workspaceLink())}">${t('打开已启动的工作台','Open a running workbench')} ↗</a><small>${t('默认端口 8765；其他端口以启动器为准。','Default port 8765. Use the launcher’s address if it differs.')}</small><div>${link(docs,t('安装说明','Setup guide'))} · <a href="?lang=${locale}${h(location.hash)}" lang="${locale}">${lang==='en'?'简体中文':'English'}</a></div></div></section>`;
+  }
   function shell(){
     document.documentElement.lang=lang;document.title=t('Seeed Studio · 产品选型助手','Seeed Studio · Product workbench');
     document.querySelector('.app-name').textContent=t('产品选型助手','Product workbench');
-    el('mode-name').textContent=publicPreview?t('只读采集预览','Read-only catalogue preview'):connected?t('本地工作台','Local workspace'):t('离线目录','Offline catalogue');
+    el('mode-name').textContent=connected?t('完整本地工作台','Full local workbench'):t('只读目录预览','Read-only catalogue');
     el('nav').setAttribute('aria-label',t('工作区','Workspace'));
     const entries=[['assistant','⌕',t('选型查询','Product finder')],['catalog','▦',t('产品目录','Catalogue')],['favorites','☆',t('我的收藏','Favorites')],['custom','▧',t('定制服务','Customization')],['coverage','▤',t('采集概况','Coverage')]];
-    el('nav').innerHTML=entries.map(([id,icon,name])=>`<button data-view="${id}" aria-current="${id===state.view?'page':'false'}"><span aria-hidden="true">${icon}</span>${h(name)}</button>`).join('');
+    el('nav').innerHTML=entries.filter(([id])=>connected||!['favorites','custom'].includes(id)).map(([id,icon,name])=>`<button data-view="${id}" aria-current="${id===state.view?'page':'false'}"><span aria-hidden="true">${icon}</span>${h(name)}</button>`).join('');
     el('developer-link').innerHTML='<span aria-hidden="true">⚙</span> '+t('开发者','Developer');
+    el('developer-link').hidden=!connected;
     el('developer-link').setAttribute('aria-current',state.view==='developer'?'page':'false');
     el('store-link').textContent=t('Seeed Studio 海外商城 ↗','Seeed Studio store ↗');
-    el('service-status').innerHTML=connected?'':`<div class="service-note">${t('当前可以查询产品。双击项目内的「启动助手.cmd」即可使用收藏、编辑、更新和 AI。','Offline catalogue. Open “Start Assistant.cmd” in the project folder for saved work, updates and AI.')} <a href="http://127.0.0.1:8765/" rel="noopener">${t('打开已启动的工作台','Open a running workspace')} ↗</a></div>`;
+    el('service-status').innerHTML=connected?'':previewGuide();
     if(connected)window.Workbench?.sidebarFavorites();
     else el('sidebar-favorites').replaceChildren();
-    if(publicPreview){
-      for(const item of document.querySelectorAll('[data-view="favorites"],[data-view="custom"],#developer-link'))item.hidden=true;
-      const other=lang==='en'?'zh':'en';
-      el('service-status').innerHTML=`<div class="service-note">${t('阶段性公开资料预览。采集覆盖和剩余项目可在「采集概况」中查看。','Interim public catalogue. Open Coverage to see what has been checked and what remains.')} <a href="?lang=${other}${h(location.hash)}">${lang==='en'?'简体中文':'English'}</a></div>`;
-    }
   }
   function queryForm(){
     const samples=lang==='en'?['J4012, need Super mode','R1100 with EU868','Industrial gateway with RS485 and DIN rail']:['J4012 需要 Super 模式','R1100，客户需要 EU868','工业网关，需要 RS485 和导轨'];
@@ -88,7 +94,7 @@
     const terms=[p.bundle,...(p.capabilities||[])].filter(Boolean).map(local);
     const missing=(p.missingSummary||p.notes.filter(n=>n.kind==='另购说明').slice(0,2).map(n=>n.text)).map(local);
     const description=state.pin?t('指定产品','Selected product'):result.selection||(result.explicit?t('指定产品','Selected product'):t('需求匹配结果','Requirement match'));
-    const proof=window.Workbench?.customizationInfo(p);
+    const proof=connected?window.Workbench.customizationInfo(p):null;
     const serviceMention=p.notes.find(n=>n.kind==='定制说明'&&n.source);
     const custom=proof?.text||(p.custom&&p.customUrl?local(p.custom):serviceMention?t('官方资料提及定制服务，适用范围待核','Customization service mentioned; scope needs confirmation'):'');
     const customSource=proof?proof.url:p.customUrl||serviceMention?.source;
@@ -200,7 +206,7 @@
     return `<div class="record-empty"><p>${h(explanation)}</p>${p.unclassifiedRows?.length?`<button class="textbtn" data-tab="raw">${t('查看待核的官网原表行','View original rows awaiting review')} ›</button> · `:''}${evidenceLink((isParts?p.partSource:p.attributeSource)||p.url)}</div>`;
   }
   function information(p){
-    const counts={attributes:p.attributes?.length||p.modelSpecs?.length,specs:specCount(p),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:p.accessories?.filter(a=>!storeOffer(a)).length,notes:p.notes.length+Number(Boolean(window.Workbench?.customizationInfo(p)||p.custom&&p.customUrl)),docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
+    const counts={attributes:p.attributes?.length||p.modelSpecs?.length,specs:specCount(p),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:p.accessories?.filter(a=>!storeOffer(a)).length,notes:p.notes.length+Number(Boolean(connected&&window.Workbench.customizationInfo(p)||p.custom&&p.customUrl)),docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
     const active=state.tab||defaultTab(p);
     return `<section class="panel information"><div class="tabs" role="tablist">${Object.entries(tabs(p)).map(([id,name])=>`<button role="tab" data-tab="${id}" aria-selected="${active===id}">${h(name)}${counts[id]?`<sup>${counts[id]}</sup>`:''}</button>`).join('')}</div><div id="tabbody" role="tabpanel">${tabBody(p)}</div></section>`;
   }
@@ -279,7 +285,7 @@
         (offers.length?`<details class="summary" open><summary>${t('商品页同时推荐加购','Also Add offers from the store')} · ${num(offers.length)}</summary><p class="caption">${t('商城将这些商品展示在同一商品页，配套使用条件需另行核实。','The store offered these products together. Check compatibility for the intended configuration.')}</p>${accessoryTable(offers)}</details>`:'');
     }
     if(active==='notes'){
-      const proof=window.Workbench?.customizationInfo(p);
+      const proof=connected?window.Workbench.customizationInfo(p):null;
       const rows=proof?[[h(proof.kind),h(proof.text),link(proof.url,t('定制依据 ↗','Service evidence ↗'))]]:
         (p.custom&&p.customUrl?[[t('系列定制','Family services'),h(local(p.custom)),link(p.customUrl,t('系列说明 ↗','Family source ↗'))]]:[]);
       for(const n of p.notes)rows.push([h(local(n.kind)),h(local(n.text)),link(n.source,(n.where?local(n.where):t('原文','Source'))+' ↗')]);
@@ -566,7 +572,10 @@
     else if(state.view==='catalog')renderCatalog();
     else if(state.view==='coverage')renderCoverage();
     else if(connected&&window.Workbench)window.Workbench.render(state.view);
-    else view.innerHTML=title(t('启动本地工作台','Start the local workspace'),t('双击项目目录中的「启动助手.cmd」继续。','Double-click “Start Assistant.cmd” in the project folder to continue.'));
+    else {
+      const names={favorites:t('我的收藏','Favorites'),custom:t('定制服务','Customization'),developer:t('开发者','Developer')};
+      view.innerHTML=title(names[state.view],t('请按上方说明启动完整工作台，再打开此页面。','Follow the instructions above to start the full workbench and open this page.'));
+    }
     syncChat();
   }
   function runQuery(q){
@@ -594,6 +603,7 @@
     if(b.dataset.tab){
       const jump=!b.closest('.tabs');state.tab=b.dataset.tab;
       if(state.pin)history.replaceState(null,'','#'+new URLSearchParams({product:state.pin,tab:state.tab}));
+      if(!connected)el('service-status').innerHTML=previewGuide();
       const old=document.querySelector('.information');
       if(old&&currentProduct){old.outerHTML=information(currentProduct);if(jump)document.querySelector('.information').scrollIntoView({block:'start',behavior:'smooth'});}
       syncChat();
@@ -611,15 +621,20 @@
     const field=el(id);field.focus();field.setSelectionRange(pos,pos);
   });
   async function start(){
-    if(publicPreview){lang=new URLSearchParams(location.search).get('lang')==='en'?'en':'zh-CN';}
-    else if(location.protocol!=='file:'){
-      try{profile=await api('/api/state');lang=profile.language==='en'?'en':'zh-CN';connected=true;}
+    lang=new URLSearchParams(location.search).get('lang')==='en'?'en':'zh-CN';
+    if(!publicPreview&&loopback&&window.Workbench&&window.WorkbenchChat){
+      try{
+        const data=await api('/api/state');
+        if(typeof data.csrf==='string'&&data.csrf&&Array.isArray(data.favorites)&&Array.isArray(data.projects)){
+          profile=data;lang=profile.language==='en'?'en':'zh-CN';connected=true;
+        }
+      }
       catch{connected=false;}
     }
-    window.Workbench?.init({api,lang:()=>lang,getDb:()=>db,getState:()=>profile,getProduct:sku=>search?.bySku.get(String(sku).toLowerCase()),
+    if(connected)window.Workbench.init({api,lang:()=>lang,getDb:()=>db,getState:()=>profile,getProduct:sku=>search?.bySku.get(String(sku).toLowerCase()),
       view,sidebar:el('sidebar-favorites'),openProduct,changeView,reloadData,onLanguage:snapLang,renderApp:render,onContextChange:syncChat});
     rebuild();
-    window.WorkbenchChat?.init({root:el('global-ai'),api,language:()=>lang,connected:()=>connected,profile:()=>({provider:profile.provider,providers:profile.providers}),
+    if(connected)window.WorkbenchChat.init({root:el('global-ai'),api,language:()=>lang,connected:()=>connected,profile:()=>({provider:profile.provider,providers:profile.providers}),
       getContext:chatContext,getContextLabel:chatContextLabel,openSettings:()=>window.Workbench?.openSettings(),
       openEvidence:openChatEvidence,openProject:id=>window.Workbench?.openProject(id),openProduct});
     window.addEventListener('hashchange',route);route();
