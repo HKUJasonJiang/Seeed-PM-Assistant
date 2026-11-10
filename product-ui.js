@@ -30,3 +30,64 @@ function mergeProductData(base,overrides){
   for(const patch of patches.values())products.push({...defaults,...patch,isEdited:true,isLocal:true});
   return {...base,products};
 }
+
+// Match repeated source rows conservatively. Similar model names or frequencies are separate items.
+function accessoryGroups(product,services,resolve){
+  const identity=value=>String(value||'').normalize('NFKC').toLowerCase().replace(/[‐‑–—]/g,'-')
+    .replace(/wi[ -]?fi/g,'wifi').replace(/\s+/g,' ').replace(/^[\s•]+|[\s.;。；]+$/g,'').trim();
+  const groups=new Map(),names=new Map();
+  const groupFor=key=>{
+    if(!groups.has(key))groups.set(key,{items:[],notes:[],services:[],matches:[],match:null});
+    return groups.get(key);
+  };
+  const aliases=(item,match)=>[item.name,item.storeName,match?.product?.name].map(identity).filter(Boolean);
+  const index=(aliases,group)=>{
+    for(const alias of aliases){if(!names.has(alias))names.set(alias,new Set());names.get(alias).add(group);}
+  };
+  const find=aliases=>{
+    const found=new Set(aliases.flatMap(alias=>[...(names.get(alias)||[])]));
+    return found.size===1?[...found][0]:null;
+  };
+  const records=(product.accessories||[]).map(item=>({item,match:resolve(item)}));
+  const identified=({item,match})=>match?.product?.sku||item.sku||item.publishedSku;
+  for(const record of records.filter(identified)){
+    const group=groupFor('sku:'+String(identified(record)).toLowerCase());
+    group.items.push(record.item);
+    if(record.match){group.match=group.match||record.match;group.matches.push(record.match);}
+    index(aliases(record.item,record.match),group);
+  }
+  for(const record of records.filter(r=>!identified(r))){
+    const keys=aliases(record.item,null);
+    const group=find(keys)||groupFor('name:'+identity(record.item.name));
+    group.items.push(record.item);index(keys,group);
+  }
+  for(const note of product.notes||[]){
+    const text=identity(note.text);
+    const item=text.replace(/\s+(?:is|are) (?:sold separately|not included)$/,'');
+    const group=find([text,item])||groupFor('note:'+text);
+    group.notes.push(note);
+  }
+  for(const service of services.filter(s=>s?.text)){
+    const text=identity(service.text);
+    const group=find([text])||groups.get('note:'+text)||groupFor('service:'+text);
+    group.services.push(service);
+  }
+  return [...groups.values()];
+}
+
+const offerPreferences=new Map();
+function offersExpanded(sku){
+  if(!offerPreferences.has(sku)){
+    let saved=false;
+    try{saved=localStorage.getItem('seeed.offerExpanded.'+sku)==='true';}catch{}
+    offerPreferences.set(sku,saved);
+  }
+  return offerPreferences.get(sku);
+}
+if(typeof document!=='undefined')document.addEventListener('click',event=>{
+  const summary=event.target.closest('details[data-offer-sku] > summary');
+  if(!summary)return;
+  const details=summary.parentElement,sku=details.dataset.offerSku,expanded=!details.open;
+  offerPreferences.set(sku,expanded);
+  try{localStorage.setItem('seeed.offerExpanded.'+sku,String(expanded));}catch{}
+});

@@ -13,6 +13,16 @@
   let profile={language:'zh-CN',provider:'deepseek',providers:{},favorites:[],projects:[],overrides:{}};
   let lang='zh-CN', connected=false;
   const state={view:'assistant',query:'J4012',pin:'',tab:'',accFilter:'',catalogQuery:'',group:'*',page:1};
+  const views=new Set(['assistant','catalog','coverage','favorites','custom','developer']);
+  const historyWindow=5;
+  const boundsKey='seeed-workbench.page-history.'+location.pathname;
+  const snapshotsKey=boundsKey+'.snapshots';
+  let entry=null, bounds=null, writeTimer=null, restoring=false;
+  const recentEntries=new Map();
+  try{
+    const saved=JSON.parse(sessionStorage.getItem(snapshotsKey)||'[]');
+    for(const item of saved.slice(-(historyWindow*2+1)))if(item?.id&&views.has(item.snapshot?.page?.view))recentEntries.set(item.id,item);
+  }catch{ /* Session storage can be disabled for file previews. */ }
   let catalogPage={skus:[],total:0};
   const t=(zh,en)=>lang==='en'?en:zh;
   const local=v=>localizedProductText(v,lang);
@@ -46,7 +56,7 @@
     if(!response.ok){const err=new Error(result.message||result.error||response.statusText);err.code=result.code||result.error;err.status=response.status;throw err;}
     return result;
   }
-  function rebuild(){db=mergeProductData(base,profile.overrides);search=createSearch(db,lang,p=>connected?window.Workbench.isEligible(p):Boolean(p.custom||p.customConfirmed));}
+  function rebuild(){db=mergeProductData(base,profile.overrides);search=createSearch(db,lang,p=>connected?window.Workbench.isEligible(p):Boolean(p.custom||p.customConfirmed),base);}
   async function reloadData(reloadBase=false){
     if(reloadBase){
       const resp=await fetch('data/catalog.js',{cache:'no-store'});
@@ -60,8 +70,11 @@
     rebuild();render();return profile;
   }
   const snapLang=v=>{lang=v==='en'?'en':'zh-CN';profile.language=lang;rebuild();render();};
-  const changeView=name=>{if(location.hash==='#'+name){state.view=name;render();}else location.hash=name;};
-  const openProduct=sku=>{const target='#product='+encodeURIComponent(sku);if(location.hash===target)route();else location.hash=target;};
+  function changeView(name){
+    if(!views.has(name))return;
+    state.view=name;render();recordNavigation('push');window.scrollTo(0,0);
+  }
+  function openProduct(sku){navigateHash('#product='+encodeURIComponent(sku));}
   const workspaceLink=()=> 'http://127.0.0.1:8765/'+location.hash;
   function previewGuide(){
     const locale=lang==='en'?'zh-CN':'en';
@@ -72,8 +85,9 @@
       `<div class="preview-guide-actions"><a class="workbench-link" href="${h(workspaceLink())}">${t('打开已启动的工作台','Open a running workbench')} ↗</a><small>${t('默认端口 8765；其他端口以启动器为准。','Default port 8765. Use the launcher’s address if it differs.')}</small><div>${link(docs,t('安装说明','Setup guide'))} · <a href="?lang=${locale}${h(location.hash)}" lang="${locale}">${lang==='en'?'简体中文':'English'}</a></div></div></section>`;
   }
   function shell(){
-    document.documentElement.lang=lang;document.title=t('Seeed Studio · 产品选型助手','Seeed Studio · Product workbench');
-    document.querySelector('.app-name').textContent=t('产品选型助手','Product workbench');
+    historyControls();
+    document.documentElement.lang=lang;document.title=t('Seeed Studio · L1轻定制小助手','Seeed Studio · L1 Light Customization Assistant');
+    document.querySelector('.app-name').textContent=t('L1轻定制小助手','L1 Light Customization Assistant');
     el('mode-name').textContent=connected?t('完整本地工作台','Full local workbench'):t('只读目录预览','Read-only catalogue');
     el('nav').setAttribute('aria-label',t('工作区','Workspace'));
     const entries=[['assistant','⌕',t('选型查询','Product finder')],['catalog','▦',t('产品目录','Catalogue')],['favorites','☆',t('我的收藏','Favorites')],['custom','▧',t('定制服务','Customization')],['coverage','▤',t('采集概况','Coverage')]];
@@ -102,9 +116,9 @@
     const serviceMention=p.notes.find(n=>n.kind==='定制说明'&&n.source);
     const custom=proof?.text||(p.custom&&p.customUrl?local(p.custom):serviceMention?t('官方资料提及定制服务，适用范围待核','Customization service mentioned; scope needs confirmation'):'');
     const customSource=proof?proof.url:p.customUrl||serviceMention?.source;
-    const options=(p.accessories||[]).filter(a=>!storeOffer(a)),offerCount=(p.accessories||[]).length-options.length;
-    const interfaces=options.filter(a=>a.type==='Expansion interface').length;
-    const optionCount=options.length?(interfaces===options.length?t(interfaces+' 个扩展接口',interfaces+' expansion interfaces'):t(options.length+' 项',options.length+' items')):t('暂无已核条目','No verified items');
+    const optionGroups=productOptions(p),options=optionGroups.filter(g=>g.items.length&&!offerOnly(g)),offerCount=optionGroups.filter(offerOnly).length;
+    const interfaces=options.filter(g=>g.items.every(a=>a.type==='Expansion interface')).length;
+    const optionCount=options.length?(interfaces===options.length?t(interfaces+' 个扩展接口',interfaces+' expansion interfaces'):t(options.length+' 项配件或扩展',options.length+' accessories or expansions')):optionGroups.some(g=>!offerOnly(g))?t('查看定制或另购说明','View customization or exclusions'):t('暂无已核条目','No verified items');
     const attrs=p.attributes||[];
     const modelSpecs=p.modelSpecs||[];
     const fields=attrs.length?attrs:modelSpecs;
@@ -122,14 +136,13 @@
       ${/^DETAIL_.*(?:SKU|ID).*VERIF/i.test(p.detailAudit?.error||'')?`<p class="warn">${t('本次打开该网址时，未能确认页面对应此 SKU。请按 SKU 核对目录记录与所引手册。','This product page could not be verified as the same SKU. Check the SKU in the catalogue record and the cited documentation.')} ${landingEvidence(p)}</p>`:''}
       ${terms.length?`<div class="tokens">${terms.map(s=>`<span>${h(s)}</span>`).join('')}</div>`:''}
       ${highlights.length?`<div class="spec-highlights">${highlights.map(a=>`<span><small>${h(attributeLabel(a.name))}</small> ${h(a.value)}</span>`).join('')}</div>`:''}
-      ${missing.length?`<div class="missing-line"><b>${t('需另购 / 不随箱','Sold separately')}</b><span>${h(missing.join(lang==='en'?', ':'、'))}</span><button class="textbtn" data-tab="notes">${t('查看依据','Evidence')} ›</button></div>`:''}
+      ${missing.length?`<div class="missing-line"><b>${t('需另购 / 不随箱','Sold separately')}</b><span>${h(missing.join(lang==='en'?', ':'、'))}</span><button class="textbtn" data-tab="accessories">${t('查看依据','Evidence')} ›</button></div>`:''}
       ${conflict?`<p class="warn"><b>${t('需求差异','Requirement gap')}</b> ${t('这个 Classic 版本不支持 Super 模式。请比较右侧的 Super J4012。','This Classic version does not support Super mode. Compare the Super J4012 in alternatives.')}</p>`:''}
-      <div class="detail-key"><div><small>${t('定制范围','Customization')}</small><div>${h(custom)}</div>${customSource?link(customSource,t('查看来源 ↗','Source ↗')):''}${serviceMention&&!proof?` <button class="textbtn" data-tab="notes">${t('查看说明','Details')} ›</button>`:''}</div>
-      <div><small>${t('官网属性','Store attributes')}</small><button class="textbtn" data-tab="attributes">${attrs.length?t(attrs.length+' 项属性',attrs.length+' fields'):modelSpecs.length?t(modelSpecs.length+' 项型号配置',modelSpecs.length+' model specs'):recordLabel(p.attributeStatus)} ›</button></div>
+      <div class="detail-key"><div><small>${t('定制范围','Customization')}</small><div>${h(custom)}</div>${customSource?link(customSource,t('查看来源 ↗','Source ↗')):''}${serviceMention&&!proof?` <button class="textbtn" data-tab="accessories">${t('查看说明','Details')} ›</button>`:''}</div>
+      <div><small>${t('技术规格','Specifications')}</small><button class="textbtn" data-tab="specs">${t('查看规格与型号配置','View specs and model details')} ›</button></div>
       <div><small>${t('箱内清单','In the box')}</small><button class="textbtn" data-tab="parts">${p.parts.length?t(p.parts.length+' 项随附',p.parts.length+' included'):recordLabel(p.partStatus)} ›</button></div>
-      <div><small>${t('配件与扩展','Accessories & expansion')}</small><button class="textbtn" data-tab="accessories">${optionCount} ›</button>${offerCount?`<small>${t('另有 '+offerCount+' 个商城加购项',offerCount+' store add-on offers')}</small>`:''}</div></div>
+      <div><small>${t('配件与定制','Accessories & customization')}</small><button class="textbtn" data-tab="accessories">${optionCount} ›</button>${offerCount?`<small>${t('另有 '+offerCount+' 个商城加购项',offerCount+' store add-on offers')}</small>`:''}</div></div>
       ${p.sharedUrl?`<small>${t('多个 SKU 共用上述商品页。','Multiple SKUs share this product page.')}</small>`:''}
-      ${specCount(p)?`<button class="textbtn spec-shortcut" data-tab="specs">${t('查看官网技术规格','View store specifications')} ›</button>`:''}
       ${p.summary||p.storeFeatures?.length||p.storeApplications?.length?`<details class="summary"><summary>${p.isEdited?t('产品简介','Product summary'):t('官网产品简介','Store summary')}</summary>${p.summary?`<p>${h(p.summary)}</p>`:''}${listed(t('官网特性','Store features'),p.storeFeatures)}${listed(t('应用场景','Applications'),p.storeApplications)}</details>`:''}</section>`;
   }
   function facts(p){
@@ -156,8 +169,9 @@
   const listed=(name,values)=>values?.length?`<b>${h(name)}</b><ul>${values.map(x=>`<li>${h(x)}</li>`).join('')}</ul>`:'';
   const numberOfRows=(tables,text)=>(tables||[]).reduce((count,table)=>count+table.rows.length,0)+(text?.length||0);
   const specCount=p=>numberOfRows(p.specTables,p.specText)+numberOfRows(p.referenceSections?.certification_info_tech?.tables,p.referenceSections?.certification_info_tech?.text);
-  const defaultTab=p=>p.attributes?.length||p.modelSpecs?.length?'attributes':!p.parts?.length&&specCount(p)?'specs':'parts';
-  const tabs=p=>({attributes:t('官网属性','Store attributes'),specs:t('技术规格','Specifications'),parts:t('箱内清单','In the box'),accessories:t('配件与扩展','Accessories'),...(p.unclassifiedRows?.length?{raw:t('原表待核','Rows to review')}:{}),notes:t('定制与另购','Options & exclusions'),docs:t('文档与来源','Documents & sources')});
+  const canonicalTab=tab=>tab==='attributes'?'specs':tab==='notes'?'accessories':tab;
+  const defaultTab=p=>p.attributes?.length||p.modelSpecs?.length||!p.parts?.length&&specCount(p)?'specs':'parts';
+  const tabs=p=>({specs:t('技术规格','Specifications'),parts:t('箱内清单','In the box'),accessories:t('配件与定制','Accessories & customization'),...(p.unclassifiedRows?.length?{raw:t('原表待核','Rows to review')}:{}),docs:t('文档与来源','Documents & sources')});
   function storeSpecifications(p){
     const statuses={empty:t('已查阅该 SKU 的 Specification 栏，官网未列正文。','The checked Specification section contains no text.'),image:t('原站以图像或嵌入内容展示规格，可打开原文查看。','The store presents specifications as images or embedded content. Open the source to inspect them.'),unparsed:t('已读取该栏目，原文格式需要复核。','The section was retrieved. Its source format needs review.')};
     const count=numberOfRows(p.specTables,p.specText),source=evidenceLink(p.specSource||p.url);
@@ -166,6 +180,15 @@
     const omitted=p.specRowsOmitted?t('另有 '+p.specRowsOmitted+' 段或行需在原文查看。',p.specRowsOmitted+' additional blocks or rows are available in the source.'):'';
     const origin=p.specLocation==='description'?t('来源为商品正文中的规格小节。','From the specifications in the product description.'):t('来源为商品的 Specification 专栏。','From the dedicated store Specification section.');
     return `<p class="caption">${origin} ${t('对照表中请读取对应型号一列。','In comparison tables, read the column for your model.')} ${h(omitted)} ${source}</p>${officialTables(p.specTables)}${listed(t('官网说明','Store notes'),p.specText)}${extra}`;
+  }
+  function modelDetails(p){
+    const raw=p.attributes||[],model=p.modelSpecs||[];
+    if(!raw.length&&!model.length)return '';
+    const fields=raw.length?raw:model;
+    const label=raw.length?t('商品页 Part List 中的型号参数','Model parameters in the store’s Part List'):t('已核型号配置','Verified model configuration');
+    const corroboration=raw.length&&model.length?`<p class="caption">${t('其他型号依据','Additional model evidence')} · ${model.map(a=>h(attributeLabel(a.name)+' '+a.value)+' '+evidenceLink(a.source||p.url)).join(' · ')}</p>`:'';
+    return `<section class="model-details"><h3>${label}</h3>`+
+      table([t('参数','Parameter'),t('本型号的值','Value for this model'),t('依据','Source')],fields.map(a=>[h(attributeLabel(a.name))+(attributeLabel(a.name)!==a.name?`<small>${h(a.name)}</small>`:'')+(a.group?`<small>${h(a.group)}</small>`:''),h(a.value),evidenceLink(a.source||p.attributeSource||p.url)]))+corroboration+'</section>';
   }
   function officialTables(tables){
     return (tables||[]).map(({title,rows})=>{
@@ -186,52 +209,127 @@
       return `<section><h3>${titles[k]}</h3><p class="caption">${s.mediaOnly?t('此栏以图示展示，见商品页。','This section uses images; see the product page.')+' ':''}${evidenceLink(s.source||p.url)}</p>${officialTables(s.tables)}${listed(t('官网说明','Store notes'),s.text)}</section>`;
     }).join('');
   }
-  function evidenceLink(url){
-    if(!url)return '';
-    if(/\/\/wiki\.seeedstudio\.com\//i.test(url))return link(url,t('官网 Wiki ↗','Official Wiki ↗'));
-    if(/\/\/github\.com\/Seeed-Studio\/wiki-documents\/blob\//i.test(url))return link(url,t('官方 Wiki 源文件 ↗','Official Wiki source ↗'));
+  function evidenceLabel(url){
+    if(/\/\/wiki\.seeedstudio\.com\//i.test(url))return t('官网 Wiki','Official Wiki');
+    if(/\/\/github\.com\/Seeed-Studio\/wiki-documents\/blob\//i.test(url))return t('官方 Wiki 源文件','Official Wiki source');
     if(/\.pdf(?:[?#]|$)/i.test(url)){
       const page=url.match(/#page=(\d+)/i)?.[1];
-      return link(url,page?t('PDF 第 '+page+' 页 ↗','PDF page '+page+' ↗'):t('官方手册 ↗','Official manual ↗'));
+      return page?t('PDF 第 '+page+' 页','PDF page '+page):t('官方手册','Official manual');
     }
-    return link(url,t('商品页 ↗','Store page ↗'));
+    return t('商品页','Store page');
   }
-  function emptyRecord(p,isParts){
-    const status=isParts?p.partStatus:p.attributeStatus;
+  const evidenceLink=url=>url?link(url,evidenceLabel(url)+' ↗'):'';
+  function emptyPackingList(p){
+    const status=p.partStatus;
     let explanation;
     if(p.isLocal)explanation=t('这是本地新增产品，暂无已核实的官网记录。','This local product has no verified store record.');
-    else if(status==='empty')explanation=isParts
-      ?t('已核对的商品栏目未列出随箱物料。官网属性和另购配件可在各自页签查看。','The checked store section lists no in-box items. See the separate tabs for attributes and accessories.')
-      :t('已核对的官网栏目未列出可识别的产品属性。','The checked store section lists no product attributes.');
+    else if(status==='empty')explanation=t('已核对的商品栏目未列出随箱物料。型号参数请查看「技术规格」，另购件请查看「配件与定制」。','The checked store section lists no in-box items. See Specifications for model details and Accessories & customization for optional items.');
     else if(status==='unparsed')explanation=t('已读取官网栏目，原文格式仍需核对。','The store section was retrieved. Its contents still need review.');
-    else explanation=isParts
-      ?t('此 SKU 的随箱物料尚待核对。请查看商品页或官方手册。','The package contents for this SKU are pending verification. Check the product page or manual.')
-      :t('此 SKU 的官网属性尚待核对。可在开发者页选择该 SKU 刷新。','Store attributes for this SKU are pending verification. Refresh the SKU in Developer.');
-    return `<div class="record-empty"><p>${h(explanation)}</p>${p.unclassifiedRows?.length?`<button class="textbtn" data-tab="raw">${t('查看待核的官网原表行','View original rows awaiting review')} ›</button> · `:''}${evidenceLink((isParts?p.partSource:p.attributeSource)||p.url)}</div>`;
+    else explanation=t('此 SKU 的随箱物料尚待核对。请查看商品页或官方手册。','The package contents for this SKU are pending verification. Check the product page or manual.');
+    return `<div class="record-empty"><p>${h(explanation)}</p>${p.unclassifiedRows?.length?`<button class="textbtn" data-tab="raw">${t('查看待核的官网原表行','View original rows awaiting review')} ›</button> · `:''}${evidenceLink(p.partSource||p.url)}</div>`;
+  }
+  let optionCache;
+  function productOptions(p){
+    if(optionCache?.product===p&&optionCache.search===search)return optionCache.groups;
+    const services=[];
+    const official=p.isEdited?base.products.find(item=>item.sku===p.sku):p;
+    if(official?.custom&&official.customUrl)services.push({kind:t('系列定制','Family customization'),text:local(official.custom),url:official.customUrl});
+    const proof=connected?window.Workbench.customizationInfo(p):null;
+    if(proof&&!services.some(s=>s.text===proof.text&&s.url===proof.url))services.push(proof);
+    const groups=accessoryGroups(p,services,item=>item.publishedSku&&!item.sku&&p.documentConflicts?.some(c=>c.publishedSku===item.publishedSku)?null:search.accessoryMatch(item));
+    optionCache={product:p,search,groups};return groups;
+  }
+  function optionType(a){
+    if(a.documentedAsAccessorySource)return t('官方文档列明的配件','Documented accessory');
+    return ({'Expansion interface':t('扩展接口','Expansion interface'),'Official accessory list':t('官方文档列明的配件','Documented accessory'),'Official compatibility list':t('官方兼容清单','Official compatibility list'),'Official module list':t('官方模组清单','Official module list'),'商品页标明选配':t('商品页标明选配','Optional on the store page')})[a.type]||local(a.type);
+  }
+  const offerOnly=g=>g.items.length>0&&g.items.every(storeOffer)&&!g.notes.length&&!g.services.length;
+  function matchingOptions(p){
+    const groups=productOptions(p),q=state.accFilter.trim();
+    if(!q)return groups;
+    return groups.filter(g=>catalogTextMatches(q,g.match?.product?.name,g.match?.product?.sku,
+      ...g.items.flatMap(a=>[a.name,a.storeName,a.sku,a.publishedSku,a.type,optionType(a),a.note,local(a.note),a.scope,
+        ...(a.compatibilityDetails||[]).flatMap(c=>[c.interface,c.voltage,c.makeCode])]),
+      ...g.notes.flatMap(n=>[n.kind,n.text,local(n.kind),local(n.text)]),...g.services.flatMap(s=>[s.kind,s.text])));
+  }
+  function optionRow(g){
+    const target=g.match?.product,first=g.items[0],name=first?.name||first?.storeName||local(g.notes[0]?.text)||g.services[0]?.text||'';
+    const details=new Set(),sources=new Map(),names=new Set([name]);
+    const add=(set,value)=>{if(value)set.add(value);};
+    const cite=(url,label)=>{
+      if(!safe(url))return;
+      if(!sources.has(url))sources.set(url,new Set());
+      sources.get(url).add(label||evidenceLabel(url));
+    };
+    for(const a of g.items){
+      add(names,a.name);add(names,a.storeName);
+      const scope=a.scope?(a.scope==='sku'?t('本型号','SKU scope'):a.scope==='family'||a.scope.includes('_')?t('系列资料','Family documentation'):t(a.scope+' 系列资料',a.scope+' family documentation')):'';
+      add(details,h([scope,optionType(a),local(a.note)].filter(Boolean).join(' · ')));
+      const doc=db.docs[a.doc];
+      if(doc&&a.page)cite(doc.url+'#page='+a.page);
+      cite(a.source,storeOffer(a)||a.documentedAsAccessorySource?t('商城加购','Store add-on'):'');
+      cite(a.documentedAsAccessorySource);
+      for(const source of [a.notIncludedSource,a.soldSeparatelySource])if(source){
+        add(details,h(t('另购 / 不随箱','Sold separately / not included')));
+        cite(source,t('另购依据','Sold-separately evidence'));
+      }
+      for(const d of a.compatibilityDetails||[]){
+        add(details,h([d.interface,d.voltage,d.makeCode?'MakeCode · '+d.makeCode:'',d.sheet&&d.row?d.sheet+' · '+t('第 '+d.row+' 行','Row '+d.row):''].filter(Boolean).join(' · ')));
+        cite(d.source);
+      }
+    }
+    for(const n of g.notes){
+      const note=local(n.text);
+      const scope=n.scope?(n.scope==='sku'?t('本型号','SKU scope'):n.scope==='family'?t('系列资料','Family documentation'):t(n.scope+' 系列资料',n.scope+' family documentation')):'';
+      add(details,h([scope,local(n.kind),names.has(note)?'':note].filter(Boolean).join(' · ')));
+      cite(n.source,local(n.where));
+    }
+    for(const s of g.services){
+      add(details,h([s.kind,names.has(s.text)?'':s.text].filter(Boolean).join(' · ')));
+      cite(s.url,t('定制依据','Customization evidence'));
+    }
+    for(const match of g.matches){
+      if(match.method==='successor'){
+        add(details,h(t('商城后继款（GA → GR），替换前请确认项目适用性。','Store successor (GA → GR). Confirm suitability before substitution.')));
+        cite(match.source,t('原厂替代通知','Manufacturer change notice'));
+      }else if(match.method!=='sku'&&match.source!==target?.url)cite(match.source,t('型号核对','Model evidence'));
+      if(match.skuSource!==target?.url)cite(match.skuSource,t('商城 SKU 依据','Store SKU evidence'));
+    }
+    const titles=[...names].map((value,index)=>index?'<small>'+h(value)+'</small>':'<b>'+h(value)+'</b>').join('');
+    const published=first?.publishedSku||first?.sku;
+    const identifier=target?productLink(target):h(published)+(published?`<small>${t('来源编号，尚无可核的商城商品','Source identifier; no confirmed store product')}</small>`:'');
+    const sourceLink=(url,labels)=>link(url,[...labels].join(' · ')+' ↗');
+    let store='';
+    if(target?.url){
+      const labels=sources.get(target.url)||new Set();labels.add(t('商品页','Store page'));
+      store=sourceLink(target.url,labels);sources.delete(target.url);
+    }
+    return [titles+[...details].map(d=>'<small>'+d+'</small>').join(''),identifier,store,[...sources].map(([url,labels])=>sourceLink(url,labels)).join('<br>')];
+  }
+  function optionsTable(p){
+    const groups=matchingOptions(p),offers=groups.filter(offerOnly),other=groups.filter(g=>!offerOnly(g));
+    const columns=[t('商品、定制及适用条件','Item, customization and conditions'),'SKU',t('商城','Store'),t('依据','Source')];
+    const list=items=>table(columns,items.map(optionRow));
+    const empty=state.accFilter?t('没有符合此筛选的记录。','No records match this filter.'):t('尚无已核实的配件、扩展或定制记录。','No accessory, expansion or customization records have been verified.');
+    return `<div class="list-tools"><input id="accfilter" aria-label="${t('筛选配件与定制','Filter accessories and customization')}" placeholder="${t('名称、接口、频段、定制或 SKU','Name, interface, band, service or SKU')}" value="${h(state.accFilter)}"><span>${groups.length} ${t('个匹配项','matches')}</span></div>`+
+      documentConflicts(p)+(other.length?list(other):'')+
+      (offers.length?`<details class="summary" data-nav-disclosure="offers" data-offer-sku="${h(p.sku)}"${offersExpanded(p.sku)?' open':''}><summary>${t('商品页同时推荐加购','Also Add offers from the store')} · ${num(offers.length)}</summary><p class="caption">${t('商城在同一商品页推荐加购。选型时请另行核实兼容条件。','The store suggested these items on the same page. Check compatibility for the intended configuration.')}</p>${list(offers)}</details>`:'')+
+      (!groups.length?`<p class="record-empty">${empty} ${state.accFilter?'':evidenceLink(p.url)}</p>`:'');
   }
   function information(p){
-    const counts={attributes:p.attributes?.length||p.modelSpecs?.length,specs:specCount(p),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:p.accessories?.filter(a=>!storeOffer(a)).length,notes:p.notes.length+Number(Boolean(connected&&window.Workbench.customizationInfo(p)||p.custom&&p.customUrl)),docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
+    const counts={specs:specCount(p)+(p.attributes?.length||p.modelSpecs?.length||0),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:productOptions(p).length,docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
     const active=state.tab||defaultTab(p);
     return `<section class="panel information"><div class="tabs" role="tablist">${Object.entries(tabs(p)).map(([id,name])=>`<button role="tab" data-tab="${id}" aria-selected="${active===id}">${h(name)}${counts[id]?`<sup>${counts[id]}</sup>`:''}</button>`).join('')}</div><div id="tabbody" role="tabpanel">${tabBody(p)}</div></section>`;
   }
   function tabBody(p){
     const active=state.tab||defaultTab(p);
-    if(active==='specs')return storeSpecifications(p);
+    if(active==='specs')return modelDetails(p)+storeSpecifications(p);
     if(active==='raw'){
       return `<p class="caption">${t('官网栏目包含下列原文，尚待确认它们是随附物料、规格还是其他说明。','These original store rows require review before they can be classified as included items, specifications or other information.')} ${evidenceLink(p.unclassifiedSource||p.url)}</p>`+
         table([t('官网原文','Original store text')],(p.unclassifiedRows||[]).map(row=>[h(Array.isArray(row)?row.join(' · '):row)]));
     }
-    if(active==='attributes'){
-      const raw=p.attributes||[],model=p.modelSpecs||[];
-      if(!raw.length&&!model.length)return emptyRecord(p,false);
-      const intro=raw.length?t('以下是该 SKU 的官网 Part List 原表属性。是否随附硬件请查看箱内清单。','These attributes come from the store’s Part List for this SKU. See “In the box” for bundled hardware.'):t('以下配置按本型号的商品标题或官方手册逐项核对。','These model details are attributed individually to a store title or official manual.');
-      const titleEvidence=raw.length&&model.length?`<p class="caption">${t('已核型号配置','Verified model details')} · ${model.map(a=>h(attributeLabel(a.name)+' '+a.value)+' '+evidenceLink(a.source||p.url)).join(' · ')}</p>`:'';
-      const fields=raw.length?raw:model;
-      return `<p class="caption">${intro} ${p.specSource?link(p.specSource,t('官网完整规格 ↗','Full store specifications ↗')):''}</p>`+
-        table([t('官网字段','Store field'),t('原始值','Store value'),t('依据','Source')],fields.map(a=>[h(attributeLabel(a.name))+(attributeLabel(a.name)!==a.name?`<small>${h(a.name)}</small>`:'')+(a.group?`<small>${h(a.group)}</small>`:''),h(a.value),evidenceLink(a.source||p.attributeSource||p.url)]))+titleEvidence;
-    }
     if(active==='parts'){
-      if(!p.parts.length)return documentConflicts(p,true)+emptyRecord(p,true);
+      if(!p.parts.length)return documentConflicts(p,true)+emptyPackingList(p);
       const doc=db.docs[p.partDoc];
       const noQty=p.parts.some(([,q])=>!q);
       const family=p.partEvidenceScope==='family'?t('以下随附物料来自官方系列资料。','The following included items are documented at the product-family level.'):p.partEvidenceScope==='mixed'?t('已合并本型号商品页与官方系列资料，依据逐项标注。','Includes SKU-specific and family-level records. Each row identifies its source.'):'';
@@ -255,9 +353,11 @@
         const notePrefix=note?.kind==='alias'?t('其他官方资料用名：','Also listed as '):note?.kind==='configuration'?t('商城列出的系列选项：','Family options listed by the store: '):note?.kind==='crossListed'?t('该物料在多个分类重复列出，实际总数待核。','The item is printed in multiple categories. Its total quantity needs confirmation. '):'';
         const noteText=note?.text?notePrefix+note.text:'';
         const description=noteText?`<small>${h(noteText)} ${note.source&&note.source!==source?evidenceLink(note.source):''} ${note.crosscheck?link(note.crosscheck,t('手册核对 ↗','Manual confirmation ↗')):''}</small>`:'';
-        const sku=p.partProductSkus?.[name],target=sku&&search.bySku.get(String(sku).toLowerCase());
         const published=p.partPublishedSkus?.[name];
-        const itemLink=target&&target.sku!==p.sku?`<small>${productLink(target,'SKU '+target.sku)}</small>`:published?`<small>${h(t('文件货号 ','Published SKU ')+published)}</small>`:'';
+        const disputed=published&&p.documentConflicts?.some(c=>c.publishedSku===published);
+        const match=disputed?null:search.accessoryMatch({name,source,sku:p.partProductSkus?.[name],publishedSku:published}),target=match?.product;
+        const replacement=match?.method==='successor'?t('商城后继款','Store successor')+' · ':'';
+        const itemLink=target&&target.sku!==p.sku?`<small>${h(replacement)}${productLink(target,'SKU '+target.sku)} · ${link(target.url,t('商城 ↗','Store ↗'))}${match.source&&match.source!==source&&match.source!==target.url?' · '+link(match.source,t('型号依据 ↗','Model evidence ↗')):''}</small>`:published?`<small>${h(t('文件货号 ','Published SKU ')+published)}</small>`:'';
         const precise=p.partSourceLocations?.[name];
         const location=precise?`<small>${h([precise.sheet,precise.cellRange||t('第 '+precise.row+' 行','Row '+precise.row)].filter(Boolean).join(' · '))}</small>`:'';
         const qtySource=p.partQuantitySources?.[name],qtyLink=qtySource&&qtySource!==source?'<small>'+link(qtySource,t('数量依据 ↗','Count source ↗'))+'</small>':'';
@@ -267,34 +367,7 @@
       return (family||quantityNote?`<p class="caption">${h([family,quantityNote].filter(Boolean).join(' '))}</p>`:'')+
         documentConflicts(p,true)+discrepancy+table([t('随箱物料','Included item'),t('数量','Quantity'),t('依据','Source')],packingRows)+alternate;
     }
-    if(active==='accessories'){
-      if(!p.accessories?.length)return documentConflicts(p)+`<div class="record-empty"><p>${t('尚无已核实的选配或扩展件记录。','No optional accessories or expansions have been verified.')}</p>${evidenceLink(p.url)}</div>`;
-      const q=state.accFilter.trim().toLowerCase(), rows=(p.accessories||[]).filter(a=>[a.name,a.storeName,a.sku,a.publishedSku,a.type,a.note,...(a.compatibilityDetails||[]).flatMap(c=>[c.interface,c.voltage,c.makeCode])].join(' ').toLowerCase().includes(q));
-      const accessoryRows=rows.filter(a=>!storeOffer(a)),offers=rows.filter(storeOffer);
-      const accessoryTable=group=>table([t('商品及适用条件','Item and conditions'),'SKU',t('商城','Store'),t('依据','Source')],group.map(a=>{
-          const target=search.bySku.get(String(a.sku||'').toLowerCase()),doc=db.docs[a.doc];
-          const evidence=doc?link(doc.url+'#page='+a.page,t('手册第 '+a.printed+' 页 ↗','Manual, printed page '+a.printed+' ↗')):evidenceLink(a.documentedAsAccessorySource||a.source);
-          const citations=[evidence];
-          if(a.documentedAsAccessorySource&&a.source&&a.source!==a.documentedAsAccessorySource)citations.push(link(a.source,t('商城加购 ↗','Store add-on ↗')));
-          const separate=a.notIncludedSource||a.soldSeparatelySource;
-          if(separate)citations.push(link(separate,t('不随箱 / 另购依据 ↗','Sold-separately evidence ↗')));
-          const scope=a.scope?(a.scope==='family'||a.scope.includes('_')?t('系列资料','Family documentation'):a.scope==='sku'?t('本型号','SKU scope'):t(a.scope+' 系列资料',a.scope+' family documentation')):'';
-          const type=a.documentedAsAccessorySource?t('官方文档列明的配件','Accessory listed in official documentation'):({'Expansion interface':t('扩展接口','Expansion interface'),'Official accessory list':t('官方文档列明的配件','Accessory listed in official documentation'),'Official compatibility list':t('官方兼容清单','Official compatibility list'),'Official module list':t('官方模组清单','Official module list'),'商品页标明选配':t('商品页标明选配','Optional on the store page')})[a.type]||local(a.type);
-          const identifier=target?productLink(target):h(a.sku||a.publishedSku)+(a.publishedSku?`<small>${t('文档编号，本地无对应商品','Published identifier, no local product')}</small>`:'');
-          const conditions=(a.compatibilityDetails||[]).map(d=>`<small>${h([d.interface,d.voltage,d.makeCode?'MakeCode · '+d.makeCode:'',d.sheet&&d.row?d.sheet+' · '+t('第 '+d.row+' 行','Row '+d.row):''].filter(Boolean).join(' · '))} ${d.source?evidenceLink(d.source):''}</small>`).join('');
-          return ['<b>'+h(a.storeName||a.name)+'</b><small>'+h([scope,type,local(a.note)].filter(Boolean).join(' · '))+'</small>'+conditions,identifier,target?link(target.url,t('商品页 ↗','Store ↗')):'',citations.filter(Boolean).join('<br>')];
-        }));
-      return documentConflicts(p)+`<div class="list-tools"><input id="accfilter" aria-label="${t('筛选配件','Filter accessories')}" placeholder="${t('接口、频段或 SKU','Interface, band or SKU')}" value="${h(state.accFilter)}"><span>${rows.length} ${t('个匹配项','matches')}</span></div>`+
-        (accessoryRows.length?accessoryTable(accessoryRows):'')+
-        (offers.length?`<details class="summary" open><summary>${t('商品页同时推荐加购','Also Add offers from the store')} · ${num(offers.length)}</summary><p class="caption">${t('商城将这些商品展示在同一商品页，配套使用条件需另行核实。','The store offered these products together. Check compatibility for the intended configuration.')}</p>${accessoryTable(offers)}</details>`:'');
-    }
-    if(active==='notes'){
-      const proof=connected?window.Workbench.customizationInfo(p):null;
-      const rows=proof?[[h(proof.kind),h(proof.text),link(proof.url,t('定制依据 ↗','Service evidence ↗'))]]:
-        (p.custom&&p.customUrl?[[t('系列定制','Family services'),h(local(p.custom)),link(p.customUrl,t('系列说明 ↗','Family source ↗'))]]:[]);
-      for(const n of p.notes)rows.push([h(local(n.kind)),h(local(n.text)),link(n.source,(n.where?local(n.where):t('原文','Source'))+' ↗')]);
-      return table([t('类型','Type'),t('官方说明','Source details'),t('依据','Source')],rows);
-    }
+    if(active==='accessories')return optionsTable(p);
     const rows=[[h(p.name),link(p.url,t('海外商城 ↗','Global store ↗'))]];
     if(p.image||p.imageUrl)rows.push([t('产品主图','Product photo'),[link(p.image,t('本地主图 ↗','Local image ↗')),link(p.imageUrl,t('官网图源 ↗','Store image ↗'))].filter(Boolean).join(' · ')]);
     const seen=new Set();
@@ -394,11 +467,11 @@
   }
   function renderCatalog(){
     let items=db.products.filter(p=>state.group==='*'||(state.group==='menu'?p.groups.length:state.group==='outside'?!p.groups.length:p.groups.includes(state.group)));
-    const term=state.catalogQuery.toLowerCase().trim();if(term)items=items.filter(p=>[p.name,p.sku,p.summary,...p.groups,...p.paths.flat()].join(' ').toLowerCase().includes(term));
+    const term=state.catalogQuery.trim();if(term)items=items.filter(p=>catalogTextMatches(term,p.name,p.sku,p.summary,...p.groups,...p.paths.flat()));
     const pages=Math.max(1,Math.ceil(items.length/25));state.page=Math.min(state.page,pages);
     const pageItems=items.slice((state.page-1)*25,state.page*25);
     catalogPage={skus:pageItems.slice(0,12).map(p=>p.sku),total:items.length};
-    view.innerHTML=title(t('产品目录','Product catalogue'),t('按品类浏览，或使用英文产品名和 SKU 定位。','Browse categories or locate a product by its name and SKU.'))+
+    view.innerHTML=title(t('产品目录','Product catalogue'),t('按品类浏览，或用产品名、常用中英文词和 SKU 定位。','Browse categories or search by name, common Chinese and English terms, or SKU.'))+
       `<div class="panel directory"><div class="catalog-controls"><input id="cattext" aria-label="${t('搜索产品目录','Search catalogue')}" placeholder="${t('产品名称或 SKU','Product name or SKU')}" value="${h(state.catalogQuery)}"><select id="category" aria-label="${t('筛选分类','Filter category')}">${[['*',t('全部商品','All products')],['menu',t('Products 菜单内','In Products menu')],['outside',t('菜单外或本地商品','Outside menu / local')],...db.categories.map(c=>[c.name,c.name])].map(([k,v])=>`<option value="${h(k)}" ${state.group===k?'selected':''}>${h(v)}</option>`).join('')}</select></div><div class="catalog-count">${num(items.length)} ${t('个商品','products')}</div>`+
       table([t('产品','Product'),'SKU',t('商城公开价','Store price'),t('商品页','Store page')],pageItems.map(p=>['<div class="catalog-name">'+photo(p)+productLink(p,p.name,'')+'</div>',productLink(p),h(price(p)),link(p.url,t('打开 ↗','Open ↗'))]))+
       `<div class="pager"><button data-page="-1" ${state.page===1?'disabled':''}>${t('上一页','Previous')}</button><span>${state.page} / ${pages}</span><button data-page="1" ${state.page===pages?'disabled':''}>${t('下一页','Next')}</button></div></div>`;
@@ -410,7 +483,8 @@
       const p=currentProduct;
       if(!p)return {view,query:state.query};
       const tab=state.tab||defaultTab(p);
-      return {view,sku:p.sku,tab,query:state.query,filter:tab==='accessories'?state.accFilter:'',alternativeSkus:currentAlternatives.map(r=>r.p.sku)};
+      const visibleSkus=tab==='accessories'?matchingOptions(p).filter(g=>!offerOnly(g)||offersExpanded(p.sku)).map(g=>g.match?.product?.sku).filter(Boolean).slice(0,12):[];
+      return {view,sku:p.sku,tab,query:state.query,filter:tab==='accessories'?state.accFilter:'',visibleSkus,alternativeSkus:currentAlternatives.map(r=>r.p.sku)};
     }
     if(view==='catalog')return {view,query:state.catalogQuery,category:state.group,page:state.page,total:catalogPage.total,visibleSkus:catalogPage.skus};
     if(view==='coverage')return {view};
@@ -582,47 +656,152 @@
     }
     syncChat();
   }
-  function runQuery(q){
-    state.query=q.trim();state.pin='';state.accFilter=/eu868/i.test(q)?'EU868':/us915/i.test(q)?'US915':'';
-    state.tab=/随箱|装箱|箱内|in the box|pack(?:ing|age) (?:list|contents)/i.test(q)?'parts':/规格|specifications?/i.test(q)?'specs':/属性|内存|存储|attributes|\bstorage\b|\bram\b/i.test(q)?'attributes':state.accFilter||/配件|扩展|wi[ -]?fi|无线网卡|accessor/i.test(q)?'accessories':/定制|logo|customiz/i.test(q)?'notes':'';
-    state.view='assistant';history.replaceState(null,'','#assistant');render();
+  function historyControls(){
+    const group=el('page-history');if(!group)return;
+    group.hidden=!entry;group.setAttribute('aria-label',t('工作台浏览记录','Workbench history'));
+    for(const button of group.querySelectorAll('[data-history]')){
+      const back=Number(button.dataset.history)<0;
+      const count=entry?Math.max(0,Math.min(historyWindow,back?entry.index-bounds.first:bounds.last-entry.index)):0;
+      const label=back?t('上一页','Back'):t('下一页','Forward');
+      button.disabled=!count;
+      button.querySelector('.wb-history-label').textContent=label;
+      button.setAttribute('aria-label',label);
+      button.title=back?t('可后退 '+count+' 页（最多 5 页）','Back '+count+' of up to 5 pages'):t('可前进 '+count+' 页（最多 5 页）','Forward '+count+' of up to 5 pages');
+    }
   }
-  function route(){
-    const hash=location.hash.slice(1);
+  const uniqueEntry=()=>globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  function navHash(){
+    if(state.view==='assistant'&&state.pin){
+      const params=new URLSearchParams({product:state.pin});if(state.tab)params.set('tab',state.tab);
+      return '#'+params;
+    }
+    return '#'+state.view;
+  }
+  function snapshot(){
+    const offer=state.view==='assistant'&&document.querySelector('[data-nav-disclosure="offers"]');
+    return {page:{...state},workspace:connected?window.Workbench.navigationState(state.view):null,offers:offer?offer.open:null};
+  }
+  function saveBounds(){
+    try{sessionStorage.setItem(boundsKey,JSON.stringify(bounds));}catch{ /* The current tab still retains its history controls. */ }
+  }
+  function remember(){
+    recentEntries.delete(entry.id);recentEntries.set(entry.id,entry);
+    if(recentEntries.size>historyWindow*2+1)recentEntries.delete(recentEntries.keys().next().value);
+    // Store the latest filter synchronously, including IME input immediately before a refresh.
+    // Project prose, API keys and item edit forms are excluded by navigationState().
+    try{sessionStorage.setItem(snapshotsKey,JSON.stringify([...recentEntries.values()]));}catch{}
+  }
+  function flushEntry(){
+    clearTimeout(writeTimer);writeTimer=null;
+    if(entry&&history.state?.seeedPage?.id===entry.id)history.replaceState({...history.state,seeedPage:entry},'');
+  }
+  function recordNavigation(mode){
+    if(!entry||restoring)return;
+    const next=snapshot();
+    if(JSON.stringify(next)===JSON.stringify(entry.snapshot))return;
+    if(mode==='push'){
+      flushEntry();
+      const index=entry.index+1;
+      entry={chain:entry.chain,index,id:uniqueEntry(),snapshot:next};
+      bounds={chain:entry.chain,first:Math.max(bounds.first,index-historyWindow),last:index};saveBounds();
+      history.pushState({seeedPage:entry},'',navHash());historyControls();
+      const workbenchLink=document.querySelector('#service-status .workbench-link');
+      if(workbenchLink)workbenchLink.href=workspaceLink();
+      const languageLink=document.querySelector('#service-status a[lang]');
+      if(languageLink)languageLink.hash=location.hash;
+    }else{
+      entry={...entry,snapshot:next};
+      clearTimeout(writeTimer);
+      if(mode==='typing')writeTimer=setTimeout(flushEntry,350);else flushEntry();
+    }
+    remember();
+  }
+  function restoreEntry(target){
+    clearTimeout(writeTimer);writeTimer=null;
+    entry=recentEntries.get(target.id)||target;
+    if(bounds?.chain!==entry.chain){
+      let saved;try{saved=JSON.parse(sessionStorage.getItem(boundsKey));}catch{}
+      bounds=saved?.chain===entry.chain?saved:{chain:entry.chain,first:entry.index,last:entry.index};
+    }
+    // The browser may travel farther back than the five pages offered by the workbench.
+    bounds.first=Math.max(Math.min(bounds.first,entry.index),entry.index-historyWindow);
+    bounds.last=Math.min(Math.max(bounds.last,entry.index),entry.index+historyWindow);saveBounds();
+    restoring=true;
+    try{
+      const saved=entry.snapshot;Object.assign(state,saved.page);
+      state.tab=canonicalTab(state.tab);
+      if(state.pin&&!search.bySku.has(state.pin.toLowerCase()))state.pin='';
+      if(connected)window.Workbench.restoreNavigation(state.view,saved.workspace);
+      render();
+      const offer=document.querySelector('[data-nav-disclosure="offers"]');
+      if(offer&&typeof saved.offers==='boolean'&&offer.open!==saved.offers){offer.open=saved.offers;syncChat();}
+    }finally{restoring=false;}
+  }
+  function queryState(q){
+    state.query=q.trim();state.pin='';state.accFilter=/eu868/i.test(q)?'EU868':/us915/i.test(q)?'US915':'';
+    if(/不随箱|不含|另购|not included|sold separately|not in the box/i.test(q))state.tab='accessories';
+    else if(/随箱|装箱|箱内|in the box|pack(?:ing|age) (?:list|contents)/i.test(q))state.tab='parts';
+    else if(/规格|属性|内存|存储|specifications?|attributes|\bstorage\b|\bram\b/i.test(q))state.tab='specs';
+    else if(state.accFilter||/配件|扩展|选配|定制|wi[ -]?fi|无线网卡|accessor|optional|logo|customiz/i.test(q))state.tab='accessories';
+    else state.tab='';
+    state.view='assistant';
+  }
+  function runQuery(q){queryState(q);render();recordNavigation('push');window.scrollTo(0,0);}
+  function resolveHash(fragment){
+    const hash=fragment.replace(/^#/,'');
     if(hash.startsWith('product=')){
       const params=new URLSearchParams(hash);
-      const sku=params.get('product'),tab=params.get('tab');
-      const p=search.bySku.get(sku.toLowerCase());if(!p){runQuery(sku);return;}
-      Object.assign(state,{view:'assistant',pin:p.sku,query:p.sku,accFilter:'',tab:Object.hasOwn(tabs(p),tab)?tab:''});
-    }else if(['assistant','catalog','coverage','favorites','custom','developer'].includes(hash))state.view=hash;
-    render();window.scrollTo(0,0);
+      const sku=params.get('product'),tab=canonicalTab(params.get('tab')||'');
+      const p=search.bySku.get(sku.toLowerCase());
+      if(p)Object.assign(state,{view:'assistant',pin:p.sku,query:p.sku,accFilter:'',tab:Object.hasOwn(tabs(p),tab)?tab:''});
+      else queryState(sku);
+    }else if(views.has(hash))state.view=hash;
+  }
+  function navigateHash(hash){resolveHash(hash);render();recordNavigation('push');window.scrollTo(0,0);}
+  function nativeRoute(){
+    const target=history.state?.seeedPage;
+    if(target&&views.has(target.snapshot?.page?.view)){
+      if(target.id!==entry?.id)restoreEntry(target);
+      return;
+    }
+    // A pasted or bookmarked fragment created by the browser already has a history slot.
+    const index=entry?entry.index+1:0,chain=entry?.chain||uniqueEntry();
+    resolveHash(location.hash);render();
+    bounds={chain,first:Math.max(bounds?.first||0,index-historyWindow),last:index};saveBounds();
+    entry={chain,index,id:uniqueEntry(),snapshot:snapshot()};remember();
+    history.replaceState({...history.state,seeedPage:entry},'');historyControls();
   }
   document.addEventListener('submit',e=>{
     if(e.target.id==='ask'){e.preventDefault();runQuery(el('asktext').value);}
   });
   document.addEventListener('click',e=>{
+    const anchor=e.target.closest('a[href^="#"]');
+    if(anchor&&!e.defaultPrevented&&e.button===0&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey){
+      const hash=anchor.getAttribute('href');
+      if(hash.startsWith('#product=')||views.has(hash.slice(1))){e.preventDefault();navigateHash(hash);return;}
+    }
     const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.history){if(!b.disabled){flushEntry();history.go(Number(b.dataset.history));}return;}
     if(b.dataset.view){changeView(b.dataset.view);return;}
     if(b.dataset.example){runQuery(b.dataset.example);return;}
     if(b.dataset.tab){
-      const jump=!b.closest('.tabs');state.tab=b.dataset.tab;
-      if(state.pin)history.replaceState(null,'','#'+new URLSearchParams({product:state.pin,tab:state.tab}));
-      if(!connected)el('service-status').innerHTML=previewGuide();
+      const jump=!b.closest('.tabs');state.tab=canonicalTab(b.dataset.tab);
       const old=document.querySelector('.information');
       if(old&&currentProduct){old.outerHTML=information(currentProduct);if(jump)document.querySelector('.information').scrollIntoView({block:'start',behavior:'smooth'});}
-      syncChat();
+      recordNavigation('push');syncChat();
       return;
     }
     if(b.dataset.group){state.group=b.dataset.group;state.catalogQuery='';state.page=1;changeView('catalog');return;}
-    if(b.dataset.page){state.page+=Number(b.dataset.page);renderCatalog();window.scrollTo(0,0);}
+    if(b.dataset.page){state.page+=Number(b.dataset.page);renderCatalog();recordNavigation('push');window.scrollTo(0,0);}
   });
-  document.addEventListener('change',e=>{if(e.target.id==='category'){state.group=e.target.value;state.page=1;renderCatalog();}});
+  document.addEventListener('change',e=>{if(e.target.id==='category'){state.group=e.target.value;state.page=1;renderCatalog();recordNavigation('push');}});
+  document.addEventListener('toggle',e=>{if(e.target.isConnected&&e.target.matches?.('[data-nav-disclosure="offers"]'))recordNavigation('replace');},true);
   document.addEventListener('input',e=>{
     const id=e.target.id,pos=e.target.selectionStart,val=e.target.value;
     if(id==='accfilter'&&currentProduct){state.accFilter=val;el('tabbody').innerHTML=tabBody(currentProduct);syncChat();}
     else if(id==='cattext'){state.catalogQuery=val;state.page=1;renderCatalog();}
     else return;
-    const field=el(id);field.focus();field.setSelectionRange(pos,pos);
+    recordNavigation('typing');const field=el(id);field.focus();field.setSelectionRange(pos,pos);
   });
   async function start(){
     lang=new URLSearchParams(location.search).get('lang')==='en'?'en':'zh-CN';
@@ -636,12 +815,13 @@
       catch{connected=false;}
     }
     if(connected)window.Workbench.init({api,lang:()=>lang,getDb:()=>db,getState:()=>profile,getProduct:sku=>search?.bySku.get(String(sku).toLowerCase()),
-      view,sidebar:el('sidebar-favorites'),openProduct,changeView,reloadData,onLanguage:snapLang,renderApp:render,onContextChange:syncChat});
+      view,sidebar:el('sidebar-favorites'),openProduct,changeView,reloadData,onLanguage:snapLang,renderApp:render,onContextChange:syncChat,onNavigationChange:recordNavigation});
     rebuild();
     if(connected)window.WorkbenchChat.init({root:el('global-ai'),api,language:()=>lang,connected:()=>connected,profile:()=>({provider:profile.provider,providers:profile.providers}),
       getContext:chatContext,getContextLabel:chatContextLabel,openSettings:()=>window.Workbench?.openSettings(),
       openEvidence:openChatEvidence,openProject:id=>window.Workbench?.openProject(id),openProduct});
-    window.addEventListener('hashchange',route);route();el('startup-help').hidden=true;
+    window.addEventListener('popstate',nativeRoute);window.addEventListener('hashchange',nativeRoute);
+    window.addEventListener('pagehide',flushEntry);nativeRoute();el('startup-help').hidden=true;
   }
   start().catch(()=>{view.textContent='目录未能打开，请按上方说明重新解压并刷新。 / The catalogue could not open. Extract the full ZIP and refresh.';});
 })();

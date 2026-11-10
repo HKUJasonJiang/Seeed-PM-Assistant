@@ -1,4 +1,12 @@
 .wb-page { max-width: 1260px; }
+.wb-history { display: inline-flex; align-items: center; gap: 2px; }
+.wb-history[hidden] { display: none; }
+.wb-history button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 8px; min-height: 34px; font-size: 13px; line-height: 1; border: 1px solid transparent; border-radius: 6px; color: var(--green); background: transparent; }
+.wb-history button:hover:enabled { background: var(--pale); border-color: var(--line); }
+.wb-history button:disabled { color: #89928b; cursor: default; }
+.wb-history button > span:first-child { font-size: 18px; }
+@media(max-width:730px){.wb-history { gap: 0; }.wb-history-label { display:none; }.wb-history button { width:32px; padding:3px; }}
+@media(max-width:430px){header .bar { gap:6px; padding-inline:8px; }header .mode { line-height:1.2; }header .vline { display:none; }}
 .wb-panel { padding: clamp(15px, 2vw, 24px); margin-bottom: 16px; }
 .wb-panel h2 { margin: 0; font-size: 19px; letter-spacing: -.35px; }
 .wb-panel h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }

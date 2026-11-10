@@ -21,8 +21,9 @@ async function check(){
       const origin=process.env.SEEED_TEST_URL||'http://127.0.0.1:8765/';
       await page.goto(origin+'#product=100025879');
       await page.locator('.hero-product').waitFor();
-      assert.equal(await page.locator('.tabs [aria-selected=true]').getAttribute('data-tab'),'attributes');
-      assert.equal(await page.locator('#tabbody tbody tr').count(),8);
+      assert.equal(await page.locator('.tabs [aria-selected=true]').getAttribute('data-tab'),'specs');
+      assert.equal(await page.locator('#tabbody .model-details tbody tr').count(),8);
+      assert.equal(await page.locator('.tabs [data-tab=attributes], .tabs [data-tab=notes]').count(),0);
       assert.match(await page.locator('.spec-highlights').innerText(),/2GB/);
       assert.match(await page.locator('.spec-highlights').innerText(),/16GB/);
       assert.match(await page.locator('.detail-key').innerText(),/25/);
@@ -51,7 +52,7 @@ async function check(){
       await page.locator('.hero-product').filter({hasText:'113991334'}).waitFor();
       assert((await page.locator('#tabbody tbody tr').count())>=7);
       await page.goto(origin+'#product=100025879&tab=attributes');
-      await page.locator('.tabs [data-tab=attributes][aria-selected=true]').waitFor();
+      await page.locator('.tabs [data-tab=specs][aria-selected=true]').waitFor();
       await page.setViewportSize({width:390,height:844});
       const width=await page.evaluate(()=>({document:document.documentElement.scrollWidth,viewport:window.innerWidth}));
       assert(width.document<=width.viewport+1,JSON.stringify(width));

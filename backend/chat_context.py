@@ -79,7 +79,7 @@ def product_sources(store,sku,lang,query,tab,secrets,include_local=True):
     hints=set(re.findall(r"[a-z0-9_-]{3,}",query.lower()))
     for pattern,words in ((r"配件|扩展","accessorySKU accessory"),(r"标配|随箱|包含|清单","inBox quantity"),(r"定制","custom"),(r"价格|报价","listedPrice"),(r"参数|规格","storeAttribute storeTitleField")):
         if re.search(pattern,query):hints.update(words.lower().split())
-    hints.update({"parts":["inbox"],"accessories":["accessorysku"],"attributes":["storeattribute","storetitlefield","documentedmodelfield"],"specs":["storespecification"],"notes":["custom"]}.get(tab,[]))
+    hints.update({"parts":["inbox"],"accessories":["accessorysku","custom","soldseparately"],"attributes":["storeattribute","storetitlefield","documentedmodelfield"],"specs":["storespecification","storeattribute","storetitlefield","documentedmodelfield"],"notes":["custom","soldseparately"]}.get(tab,[]))
     def rank(entry):return sum(h in entry.lower() for h in hints)
     for s in sources:
         s["facts"]=sorted(s["facts"],key=rank,reverse=True)[:9]
@@ -157,7 +157,9 @@ def prepare_turn(store,body,history):
         selected=page.get("selectedSkus",[])+page.get("projectDraft",{}).get("skus",[])
         prior_request=re.search(r"比|之前|上一|刚才|前面|那款|它|compar|previous|earlier|before|that (?:one|product|device)",query,re.I)
         prior=established if page["view"]!="developer" and prior_request else []
-        context_ids=([primary] if primary else [])+named+selected+prior+alts+page.get("visibleSkus",[])
+        visible=page.get("visibleSkus",[])
+        related=visible+alts if page["view"]=="assistant" and page.get("tab")=="accessories" and page.get("filter") else alts+visible
+        context_ids=([primary] if primary else [])+named+selected+prior+related
         ids=list(dict.fromkeys(context_ids))[:6]
         sources=project_sources(store,page,lang,secrets)+workspace_source(store,page,lang,secrets)
         lookup=query+" "+page.get("filter","")+" "+page.get("query","")

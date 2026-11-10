@@ -1,10 +1,120 @@
+/* Text filters share synonyms. Product identity is resolved separately, without fuzzy matching. */
+function normalizeCatalogText(value) {
+  return String(value??'').normalize('NFKC').toLowerCase()
+    .replace(/[‐‑‒–—−]/g,'-')
+    .replace(/无线局域网|無線區域網路|无线网络|無線網路|\bwi[\s-]*fi(?=\b|\d)|\bwlan\b/g,' wifi ')
+    .replace(/(?:电源|電源)\s*(?:适配器|適配器|轉接器)|\bpower[\s-]*adapt(?:er|or)s?\b/g,' power adapter ')
+    .replace(/蓝牙|藍牙/g,' bluetooth ')
+    .replace(/天线|天線/g,' antenna ')
+    .replace(/\b(?:usb[\s-]*type[\s-]*c|usb[\s-]*c|type[\s-]*c)\b/g,' usb-c ')
+    .replace(/\bmini[\s-]*pci[\s-]*e\b/g,' mini-pcie ')
+    .replace(/\brs[\s-]*485\b/g,' rs485 ')
+    .replace(/\s+/g,' ').trim();
+}
+
+function catalogTextMatches(query,...values) {
+  const words=normalizeCatalogText(query).match(/power adapter|[a-z0-9]+(?:[.-][a-z0-9]+)*|[\p{Script=Han}]+/gu)||[];
+  if(!words.length)return !String(query??'').trim();
+  const haystack=normalizeCatalogText(values.flat(Infinity).join(' '));
+  return words.every(word=>/^(?:[a-z]{0,3}\d{6,})$/.test(word)
+    ?new RegExp('(?:^|[^a-z0-9])'+word+'(?:$|[^a-z0-9])').test(haystack)
+    :haystack.includes(word));
+}
+
+function accessoryResolver(catalog,bySku) {
+  const names=new Map(), urls=new Map();
+  const sourceFor=row=>row.source||(catalog.docs?.[row.doc]?.url&&row.page
+    ?catalog.docs[row.doc].url.split('#')[0]+'#page='+row.page:'');
+  function storePath(url) {
+    try {
+      const u=new URL(url);
+      if(!/^https?:$/.test(u.protocol)||u.hostname!=='www.seeedstudio.com'||!/\.html$/i.test(u.pathname))return '';
+      return u.pathname.split('/').map(segment=>encodeURIComponent(decodeURIComponent(segment))).join('/');
+    } catch {return '';}
+  }
+  function officialSource(url) {
+    try {
+      const u=new URL(url);
+      return u.protocol==='https:'&&(/^(?:www|files|wiki)\.seeedstudio\.com$/.test(u.hostname)||
+        (u.hostname==='github.com'&&/^\/(?:Seeed-Studio|SeeedDocument)\//i.test(u.pathname)));
+    } catch {return false;}
+  }
+  // Keep model revisions, sizes, punctuation, socket types and regional bands distinct.
+  const key=name=>String(name||'').normalize('NFKC').toLowerCase().replace(/[‐‑‒–—−]/g,'-').replace(/\s+/g,' ').trim();
+  function add(map,id,result) {
+    if(!id)return;
+    if(!map.has(id))map.set(id,result);
+    else if(map.get(id)?.product.sku!==result.product.sku)map.set(id,null);
+  }
+  function eligible(p) {
+    return Boolean(p&&storePath(p.url)&&(!p.storePageStatus||p.storePageStatus==='verified'));
+  }
+  for(const p of catalog.products){
+    if(!storePath(p.url))continue;
+    // Even a dated listing with the same URL/name must block ambiguous matches.
+    add(urls,storePath(p.url),{product:p,method:'url',source:p.url});
+    add(names,key(p.name),{product:p,method:'name',source:p.url});
+  }
+  for(const host of catalog.products)for(const a of host.accessories||[]){
+    const target=bySku.get(String(a.sku||'').toLowerCase()),source=sourceFor(a);
+    if(target&&officialSource(source)&&/(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}/i.test(a.name))
+      add(names,key(a.name),{product:target,method:'document-name',source});
+  }
+  const successorSource='https://cdn.soselectronic.com/productdata/cc/5e/c994a4ec/ec21euxga-128-sgns.pdf#page=1';
+  const successorSkuSource='https://files.seeedstudio.com/wiki/reComputer-R1000/reComputer-R1100/reComputer-R1100-flyer.pdf#page=3';
+  return function accessoryMatch(a) {
+    if(!a)return null;
+    const id=String(a.sku||a.publishedSku||'').trim().toLowerCase();
+    const source=sourceFor(a);
+    if(id){
+      const product=bySku.get(id);
+      if(a.publishedSku&&String(a.publishedSku).trim().toLowerCase()!==id)return null;
+      if(a.productUrl&&storePath(a.productUrl)!==storePath(product?.url))return null;
+      return product?{product,method:'sku',source:source||product.url}:null;
+    }
+    if(a.productUrl){
+      const identified=urls.get(storePath(a.productUrl));
+      return eligible(identified?.product)?identified:null;
+    }
+    if(!officialSource(source))return null;
+    const name=key(a.name);
+    if(/^ec25euxga-minipcie(?: 4g module| module \(gps \/ 4g\)| module)?$/.test(name)){
+      const product=bySku.get('113991135');
+      if(eligible(product)&&/\bEC25-EUX-mini-PCIe\b/i.test(product.name)&&/EMEA and Thai/i.test(product.name))
+        return {product,method:'successor',source:successorSource,skuSource:successorSkuSource};
+      return null;
+    }
+    // The shield Wiki specifies the two panel sizes. Preserve the decimal size and the bare panel identity.
+    const panel=/^(2\.[07])-inch e-paper display panel$/.exec(name);
+    if(panel&&source.startsWith('https://wiki.seeedstudio.com/Small_e-Paper_Shield/')){
+      const match=names.get(panel[1]+' e-paper panel');
+      if(eligible(match?.product))return {...match,source:match.product.url};
+    }
+    // A generic cable, antenna or radio family can describe many distinct stock items.
+    if(!/\d/.test(name)&&!/^grove\s*-\s*\S|^seeed studio\s+\S/.test(name))return null;
+    const match=names.get(name);
+    return eligible(match?.product)?match:null;
+  };
+}
+
 /* Local deterministic matching. The explicit model stays selected when a requirement conflicts. */
-function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.customUrl||p.customConfirmed)) {
+function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.customUrl||p.customConfirmed),officialCatalog=catalog) {
   const en=language==='en';
   const pick=(zh,eng)=>en?eng:zh;
   const products = catalog.products;
   const bySku = new Map(products.map(p => [p.sku.toLowerCase(), p]));
-  const lower = text => (text || '').toLowerCase().replace(/[‑–—]/g, '-');
+  const officialSkus=officialCatalog===catalog?bySku:new Map(officialCatalog.products.map(p=>[p.sku.toLowerCase(),p]));
+  const accessoryMatch=accessoryResolver(officialCatalog,officialSkus);
+  const modelQueries=new Map();
+  for(const host of officialCatalog.products)for(const row of host.accessories||[]){
+    if(row.sku||row.publishedSku)continue;
+    const result=accessoryMatch(row);
+    if(!result)continue;
+    const full=normalizeCatalogText(row.name);
+    modelQueries.set(full,result);
+    if(result.method==='successor')modelQueries.set(normalizeCatalogText(row.name.split(/\s+/)[0]),result);
+  }
+  const lower = text => String(text??'').normalize('NFKC').toLowerCase().replace(/[‐‑‒–—−]/g, '-');
   const traits = [
     {key:'super',label:'Super 模式',ask:/super(?:\s*mode|\s*模式)?|maxn|157\s*tops/i,yes:p=>p.series==='super'},
     {key:'wifi',label:'Wi-Fi',ask:/wi[\s-]?fi|无线网|无线局域网/i,word:/wi[\s-]?fi|wireless nic/i},
@@ -29,7 +139,8 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   ];
   const englishLabels={super:'Super mode',ether:'dual Ethernet',custom:'customization',gateway:'gateway',jetson:'Jetson edge inference',pi:'Raspberry Pi',fanless:'fanless',edge:'edge computing',din:'DIN rail',sensor:'sensors',temp:'temperature',camera:'camera',display:'display',micro:'development board',robot:'robotics'};
   if(en)for(const t of traits)t.label=englishLabels[t.key]||t.label;
-  const searchable=new Map(products.map(p=>[p.sku,lower([p.name,p.summary,...(p.capabilities||[]),...p.groups,...(p.attributes||[]).map(a=>a.name+' '+a.value),...(p.modelSpecs||[]).map(a=>a.name+' '+a.value)].join(' '))]));
+  const titles=new Map(products.map(p=>[p.sku,normalizeCatalogText(p.name)]));
+  const searchable=new Map(products.map(p=>[p.sku,normalizeCatalogText([p.name,p.summary,...(p.capabilities||[]),...(p.groups||[]),...(p.attributes||[]).map(a=>a.name+' '+a.value),...(p.modelSpecs||[]).map(a=>a.name+' '+a.value)].join(' '))]));
   function negated(query, t) {
     const clause=query.split(/[，,。;；\n]/).find(c=>t.ask.test(c));
     if(!clause)return false;
@@ -44,7 +155,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     const head=normModel(first);
     return {p,head,full:normModel(p.name),qualified:first.trim().length!==p.name.trim().length};
   }).filter(a=>a.head.length>=5 && /\d/.test(a.head));
-  const noAdapter=/无电源|无适配器|不(?:含|需(?:要)?)电源|自备\s*(?:适配器|电源)|(?:电源|适配器)\s*(?:由.{0,4})?自备|w\/o|without.*adapter|own power (?:supply|adapter)|no (?:power )?adapter/i;
+  const noAdapter=/无电源|无适配器|不(?:含|需(?:要)?)电源|自备\s*(?:适配器|电源)|(?:电源|适配器)\s*(?:由.{0,4})?自备|(?:w\/o|without)\s+(?:(?:an?|the)\s+)?(?:power\s+)?adapt[eo]r|own power (?:supply|adapt[eo]r)|no (?:power )?adapt[eo]r/i;
   const gatewayModels=new Map();
   for(const p of products){
     const code=lower(p.name).match(/^recomputer\s+(r\d{4}(?:-\d+)?)\b/)?.[1];
@@ -83,7 +194,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     return null;
   }
   function score(p,q,needs) {
-    const n=lower(p.name), s=searchable.get(p.sku);
+    const n=titles.get(p.sku), s=searchable.get(p.sku);
     let points=0;
     for(const t of needs) if(matches(p,t)) {
       points+=t.word?.test(n)?9:4;
@@ -96,15 +207,28 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
       if(n.includes(w))points+=Math.min(w.length,8);
       else if(s.includes(w))points+=1;
     }
-    if(q.length>2 && n.includes(q))points+=24;
+    if(q.length>2 && n.includes(q)){
+      points+=24;
+      const head=n.split(/[|,(（，]|\s+(?:with|without|compatible with|for|featuring|-)\s+/i)[0];
+      if(head.includes(q))points+=12;
+      if(head.startsWith(q))points+=4;
+    }
     if(p.sku.toLowerCase()===q)points+=1000;
     return points;
   }
   function lookup(query) {
-    const q=lower(query.trim()), needs=intents(q), fixed=named(q);
-    const ranked=products.map(p=>({p,score:score(p,q,needs)})).filter(x=>x.score>0)
+    const q=lower(query.trim()), standard=normalizeCatalogText(q), needs=intents(standard);
+    const documentMatch=modelQueries.get(standard);
+    const fixed=named(q)||(documentMatch&&bySku.get(documentMatch.product.sku.toLowerCase()));
+    // Negative requirements are not positive search keywords for alternative products.
+    let positive=standard;
+    for(const t of traits)if(negated(standard,t))positive=positive.replace(t.ask,' ');
+    if(noAdapter.test(q))positive=positive.replace(/\bpower adapter\b/g,' ');
+    const ranked=products.map(p=>({p,score:score(p,positive.trim(),needs)})).filter(x=>x.score>0)
       .sort((a,b)=>Number(a.p.storePageStatus==='not_found')-Number(b.p.storePageStatus==='not_found')||b.score-a.score||Number(Boolean(b.p.series))-Number(Boolean(a.p.series))||a.p.name.localeCompare(b.p.name));
     let selection='';
+    if(documentMatch?.method==='successor'&&documentMatch.product.sku===fixed?.sku)
+      selection=pick('对应商城后继款 · EC25-EUX，GA → GR（EMEA／泰国）','Store successor · EC25-EUX, GA → GR (EMEA / Thailand)');
     if(fixed && !q.includes(fixed.sku.toLowerCase())){
       if(q.includes('r1100')&&!/r11[0-9][1-9]/.test(q))selection=pick('指定系列 · 展示 R1125-10 代表配置，请确认具体型号','Series match · R1125-10 shown as a representative configuration');
       else if(fixed.series==='classic'&&!noAdapter.test(q)&&!/含电源|带电源|with power adapter/i.test(q))selection=pick('指定型号 · 默认展示 Classic 含适配器版，请确认版本','Model match · Classic adapter bundle shown by default');
@@ -146,6 +270,6 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     }
     return list.sort((a,b)=>Number(a.p.storePageStatus==='not_found')-Number(b.p.storePageStatus==='not_found')||b.weight-a.weight||a.p.name.localeCompare(b.p.name)).slice(0,3);
   }
-  return {lookup,alternatives,matches,bySku};
+  return {lookup,alternatives,matches,bySku,matchesText:(text,query)=>catalogTextMatches(query,text),accessoryMatch};
 }
-if(typeof module!=='undefined')module.exports=createSearch;
+if(typeof module!=='undefined')Object.assign(module.exports=createSearch,{normalizeCatalogText,catalogTextMatches});

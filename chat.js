@@ -28,8 +28,8 @@
     coverage:l('资料覆盖','Coverage'),developer:l('开发者设置','Developer settings')
   });
   const tabNames = () => ({
-    attributes:l('商品属性','Attributes'),parts:l('随箱清单','In the box'),accessories:l('扩展配件','Accessories'),
-    docs:l('官方文档','Documents'),notes:l('定制与另购','Customization and extras'),specs:l('规格','Specifications')
+    attributes:l('技术规格','Specifications'),parts:l('随箱清单','In the box'),accessories:l('配件与定制','Accessories & customization'),
+    docs:l('官方文档','Documents'),notes:l('配件与定制','Accessories & customization'),specs:l('技术规格','Specifications')
   });
   const formatTime = stamp => {
     if(!stamp || !Number.isFinite(Date.parse(stamp)))return '';

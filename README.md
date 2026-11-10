@@ -1,4 +1,4 @@
-# Seeed PM Assistant
+# Seeed Studio · L1 Light Customization Assistant
 
 [简体中文](README.zh-CN.md)
 
@@ -25,8 +25,9 @@ To finish for the day, close the browser tab. To stop the local service, double-
 | --- | --- |
 | Identify a product or suggest an alternative | In **Product finder**, enter a SKU, model or need such as `J4012, need Super mode`. A specified product stays on the first card. A family name can show a representative configuration. Check the SKU and the stated reason for each alternative. The search rules are available beneath the search box. |
 | Prepare a quotation | Open the full store URL at the top of the card. Read the listing currency, price or range and snapshot date. Confirm the current price, stock, quantity pricing and any customization charges with the relevant sales channel before quoting. A blank price means the workbench has no usable figure. |
-| Check package contents and expansion | Use **In the box**, **Accessories**, **Options & exclusions** and **Documents & sources**. Watch for region, interface, power adapter and SKU differences. Try `R1100 with EU868` and compare the SPI module `114993268` with the USB module `114992628`. A handbook page or suggested add-on can have different scope from a SKU-specific packing list. |
-| Track items and a custom request | Use the star on a product card. The sidebar arrow collapses the favorites list. In **Customization**, create a project with a title, requirements, labels and one or more eligible SKUs. Eligibility comes from applicable manufacturer evidence or an explicit local confirmation. |
+| Check package contents and expansion | Open **In the box** for bundled items. **Accessories & customization** lets you filter extensions, exclusions and services together by name, interface, band or SKU. Both `wifi` and `Wi-Fi` match, as do `power adapter` and `电源适配器`. Try `R1100 with EU868` and compare SPI module `114993268` with USB module `114992628`. Expand **Also Add offers from the store** to check the original suggestions. |
+| Revisit a page | The **Back** and **Forward** controls at the top recall up to five steps in either direction, including searches, filters and product tabs. |
+| Track items and a custom request | Use the star on a product card. The sidebar favorites list starts collapsed. Select the arrow to open it. In **Customization**, create a project with a title, requirements, labels and one or more eligible SKUs. Eligibility comes from applicable manufacturer evidence or an explicit local confirmation. |
 | Edit a local record or change language | Open **Developer → Product editor** to add a SKU, correct details or replace the main image. Local edits keep priority after a store refresh. For English or Simplified Chinese, use **Developer → Language & AI**. Product names, quoted source text and your own entries keep their original language. |
 
 ### What the included catalogue covers

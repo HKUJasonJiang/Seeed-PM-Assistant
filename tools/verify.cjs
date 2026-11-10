@@ -7,6 +7,54 @@ global.window={};
 require(process.env.SEEED_TEST_CATALOG||path.join(root,'data/catalog.js'));
 const db=window.SEEED_CATALOG;
 const search=require(path.join(root,'search.js'))(db);
+const {normalizeCatalogText,catalogTextMatches}=require(path.join(root,'search.js'));
+const choices=q=>search.lookup(q).ranked.slice(0,12).map(hit=>hit.p.sku);
+const wifi=['wifi','WI-FI','Wi‑Fi','ＷＩＦＩ','wi fi','WLAN'];
+const power=['power adapter','Power Adaptor','POWER-ADAPTER','电源适配器','電源適配器'];
+for(const terms of [wifi,power])for(const query of terms){
+  assert.equal(normalizeCatalogText(query),normalizeCatalogText(terms[0]));
+  assert.deepEqual(choices(query),choices(terms[0]),query);
+}
+assert.match(search.lookup('电源适配器').primary.name,/Power Adapter/i);
+assert(!/without|w\/o/i.test(search.lookup('power adapter').primary.name.split('Power Adapter')[0]));
+assert(catalogTextMatches('wifi 天线','Raspberry Pi CM4','Wi-Fi/BLE Antenna'));
+assert(catalogTextMatches('电源适配器','American-standard POWER ADAPTOR'));
+assert(!catalogTextMatches('power adapter','power cable','wireless adapter'));
+assert(!catalogTextMatches('114993268','1149932680'));
+assert(!catalogTextMatches('E24121001','E241210012'));
+assert(search.matchesText(['Power Adaptor','EU plug'],'电源适配器'));
+assert(!search.lookup('J4012 不需要 WI-FI').needs.some(t=>t.key==='wifi'));
+assert.equal(search.lookup('110110191 power adapter').primary.sku,'110110191');
+const industrial=search.bySku.get('110110191');
+const oldRadio=industrial.accessories.find(a=>a.name.includes('EC25EUXGA'));
+const successor=search.accessoryMatch(oldRadio);
+assert.equal(successor.method,'successor');
+assert.equal(successor.product.sku,'113991135');
+assert.match(successor.source,/#page=1$/);
+assert.match(successor.skuSource,/#page=3$/);
+assert.match(successor.product.url,/EC25-EUX-mini-PCIe-p-5669/);
+assert.equal(search.lookup('EC25EUXGA-MINIPCIE').primary.sku,'113991135');
+for(const name of ['EC25EUGA-MINIPCIE 4G module','EC25EUXGA-MINIPCIE antenna kit','EC20CEHCLG-MINIPCIE 4G module','WM1303 LoRaWAN gateway module (SPI, EU868)','RTL8822CE','Power adapter (optional)']){
+  assert.equal(search.accessoryMatch({...oldRadio,name}),null,name);
+}
+assert.equal(search.accessoryMatch({...oldRadio,sku:'not-a-real-sku'}),null);
+assert.equal(search.accessoryMatch({...oldRadio,sku:'113991135',publishedSku:'113991134'}),null);
+assert.equal(search.accessoryMatch({...oldRadio,sku:'113991135',productUrl:search.bySku.get('113991134').url}),null);
+assert.equal(search.accessoryMatch({...oldRadio,source:'https://example.org/uncited-part'}),null);
+assert.equal(search.accessoryMatch({productUrl:search.bySku.get('110990471').url}),null,'Two SKUs share a store URL');
+const realPart='2.4GHz FPC Antenna A-02 for XIAO ESP32-S3';
+const kit=search.bySku.get('100069905');
+assert(kit.parts.some(([name])=>name===realPart));
+assert.equal(search.accessoryMatch({name:realPart,source:kit.partSources?.[realPart]||kit.partSource||kit.url}).product.sku,'318020968');
+const panel= db.products.flatMap(p=>p.accessories||[]).find(a=>a.name==='2.7-inch e-paper display panel');
+assert.equal(search.accessoryMatch(panel).product.sku,'104990054');
+assert.equal(search.accessoryMatch({...panel,name:'2.7-inch e-paper display HAT'}),null);
+const original=search.bySku.get('318020968');
+const small={products:[kit,original]};
+const altered={products:[kit,{...original,name:'Invented model 123 X'}]};
+const localSearch=require(path.join(root,'search.js'))(altered,'en',()=>false,small);
+assert.equal(localSearch.accessoryMatch({name:'Invented model 123 X',source:kit.url}),null);
+assert.equal(localSearch.accessoryMatch({name:realPart,source:kit.url}).product.name,original.name);
 assert.equal(new Set(db.products.map(p=>p.sku)).size,db.stats.total);
 for (const p of db.products) {
   if (p.image) assert(fs.existsSync(path.join(root,p.image)),p.sku);

@@ -94,7 +94,7 @@
     if(favoriteExpanded===undefined){
       let saved=null;
       try{saved=localStorage.getItem(favoritePreference);}catch{}
-      favoriteExpanded=saved===null?window.matchMedia('(min-width:991px)').matches:saved==='true';
+      favoriteExpanded=saved==='true';
     }
     return favoriteExpanded;
   }
@@ -395,6 +395,50 @@
     ui.activeDev='settings';
     changeView('developer');
   }
+  // Browser history stores navigation choices. Unsaved customer text stays in this tab's memory.
+  const draftCopies=new Map();
+  const draftIds=new WeakMap();
+  function navigationState(view){
+    if(view==='favorites')return {selected:[...ui.selectedFavorites],target:ui.targetProject};
+    if(view==='custom'){
+      const d=ui.projectDraft;
+      const result={filterSku:ui.filterSku,filter:ui.customFilter,page:ui.customPage};
+      if(d){
+        let id=draftIds.get(d);
+        if(!id){id=globalThis.crypto?.randomUUID?.()||Date.now()+'-'+Math.random();draftIds.set(d,id);}
+        draftCopies.delete(id);draftCopies.set(id,{...d,skus:[...d.skus]});
+        if(draftCopies.size>16)draftCopies.delete(draftCopies.keys().next().value);
+        result.draft={id,project:d.id,skus:[...d.skus]};
+      }
+      return result;
+    }
+    if(view==='developer')return {tab:ui.activeDev,editor:ui.editor?(ui.editor.original?.sku||'new'):'',query:ui.editorQuery,diffQuery:ui.diffQuery,diffPage:ui.diffPage};
+    return null;
+  }
+  function restoreNavigation(view,saved){
+    if(!saved)return;
+    if(view==='favorites'){
+      ui.selectedFavorites=new Set((saved.selected||[]).filter(s=>favorites().includes(s)));
+      ui.targetProject=projects().some(p=>p.id===saved.target)?saved.target:'';
+    }else if(view==='custom'){
+      ui.filterSku=getProduct(saved.filterSku)?saved.filterSku:'';
+      ui.customFilter=saved.filter||'';ui.customPage=Math.max(1,saved.page||1);ui.projectDraft=null;
+      const draft=saved.draft;
+      if(draft&&(!draft.project||projects().some(p=>p.id===draft.project))){
+        const stored=draftCopies.get(draft.id);
+        if(stored)ui.projectDraft={...stored,skus:[...stored.skus]};
+        else if(draft.project)editProject(draft.project);
+        else ui.projectDraft=newDraft();
+        ui.projectDraft.skus=(draft.skus||[]).filter(s=>eligible(getProduct(s)));
+        if(stored)draftIds.set(ui.projectDraft,draft.id);
+      }
+    }else if(view==='developer'){
+      ui.activeDev=['settings','products','updates'].includes(saved.tab)?saved.tab:'settings';
+      ui.editorQuery=saved.query||'';ui.diffQuery=saved.diffQuery||'';ui.diffPage=Math.max(1,saved.diffPage||1);
+      const p=saved.editor&&getProduct(saved.editor);
+      ui.editor=p||saved.editor==='new'?defaultEditor(p):null;ui.imageSearch='';
+    }
+  }
   function render(id) {
     if(!customTypes.has(id))return;
     if(ui.view!==id){ui.notice='';ui.noticeError=false;}
@@ -425,7 +469,7 @@
     if(!payload.title){document.getElementById('wb-project-title')?.focus();return;}
     if(d.id)payload.id=d.id;
     await write('/api/project',payload);
-    ui.projectDraft=null;redraw();notify(L('定制需求已保存。','Project saved.'));
+    ui.projectDraft=null;redraw();app.onNavigationChange?.('replace');notify(L('定制需求已保存。','Project saved.'));
   }
   async function addFavorites(){
     const members=[...ui.selectedFavorites];
@@ -578,7 +622,7 @@
       case 'member-remove':if(ui.projectDraft){ui.projectDraft.skus=ui.projectDraft.skus.filter(s=>s!==sku);redraw();}break;
       case 'custom-prev':ui.customPage--;updateDom('wb-eligible-list',eligibleList());break;
       case 'custom-next':ui.customPage++;updateDom('wb-eligible-list',eligibleList());break;
-      case 'devtab':ui.activeDev=id;ui.notice='';redraw();if(id==='updates')await pollUpdate();break;
+      case 'devtab':ui.activeDev=id;ui.notice='';redraw();app.onNavigationChange?.('push');if(id==='updates')await pollUpdate();break;
       case 'clear-key':if(window.confirm(L('移除此提供商在本机保存的密钥？','Remove the key saved for this provider?')))await saveProvider(true);break;
       case 'edit-sku':setEditor(getProduct(sku));break;
       case 'new-sku':setEditor();break;
@@ -603,11 +647,14 @@
       case 'diff-prev':ui.diffPage--;updateDom('wb-diff-list',diffRows());break;
       case 'diff-next':ui.diffPage++;updateDom('wb-diff-list',diffRows());break;
     }
+    if(['new-from-sku','new-project','edit-project','cancel-project','clear-custom','custom-prev','custom-next','edit-sku','new-sku','cancel-editor','diff-prev','diff-next'].includes(action))app.onNavigationChange?.('push');
+    else if(['delete-project','member-add','member-remove','star'].includes(action))app.onNavigationChange?.('replace');
   }
   function onInput(e){
     const el=e.target, id=el.id, val=el.value;
     if(el.dataset.wbDraft && ui.projectDraft){
       ui.projectDraft[el.dataset.wbDraft]=val;
+      app.onNavigationChange?.('typing');
       if(el.dataset.wbDraft==='title'||el.dataset.wbDraft==='labels')app.onContextChange?.();
       if(el.dataset.wbDraft==='picker')updateDom('wb-member-options',projectChoices());return;
     }
@@ -626,10 +673,11 @@
       case 'wb-refresh-skus':ui.refreshSkus=val;break;
       case 'wb-diff-query':ui.diffQuery=val;ui.diffPage=1;updateDom('wb-diff-list',diffRows());break;
     }
+    if(['wb-custom-filter','wb-edit-query','wb-diff-query'].includes(id))app.onNavigationChange?.('typing');
   }
   async function onChange(el) {
     if(el.dataset.wbFavCheck){
-      if(el.checked)ui.selectedFavorites.add(el.dataset.wbFavCheck);else ui.selectedFavorites.delete(el.dataset.wbFavCheck);redraw();return;
+      if(el.checked)ui.selectedFavorites.add(el.dataset.wbFavCheck);else ui.selectedFavorites.delete(el.dataset.wbFavCheck);redraw();app.onNavigationChange?.('replace');return;
     }
     if(el.dataset.wbDiffsku){
       if(el.checked)ui.changes.add(el.dataset.wbDiffsku);else ui.changes.delete(el.dataset.wbDiffsku);updateDom('wb-diff-list',diffRows());return;
@@ -658,6 +706,7 @@
         updateDom('wb-diff-list',diffRows());break;
       }
     }
+    if(el.id==='wb-allfav'||el.id==='wb-target-project')app.onNavigationChange?.('replace');
   }
   let initialized=false;
   function init(config){
@@ -687,5 +736,5 @@
       void task('submit:'+e.target.id,e.submitter,handler);
     });
   }
-  window.Workbench={init,render,sidebarFavorites,productActions,openCustomFor,openProject,openSettings,chatContext,isEligible:eligible,customizationInfo:customInfo};
+  window.Workbench={init,render,sidebarFavorites,productActions,openCustomFor,openProject,openSettings,chatContext,navigationState,restoreNavigation,isEligible:eligible,customizationInfo:customInfo};
 })();
