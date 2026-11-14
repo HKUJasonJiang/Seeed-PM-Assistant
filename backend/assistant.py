@@ -171,5 +171,5 @@ def cited_reply(raw,sources,provider,model,allow_guidance=False):
             paragraphs.append(" ".join([text]+[f"[{i}]" for i in refs]))
     except (KeyError,TypeError,ValueError,AttributeError):
         raise Problem("AI_CITATIONS_UNVERIFIED",502) from None
-    return {"answer":"\n\n".join(paragraphs),"sources":[{k:s[k] for k in ("id","title","url","sku","kind","projectId") if k in s} for s in sources if s["id"] in cited],
+    return {"answer":"\n\n".join(paragraphs),"sources":[{k:s[k] for k in ("id","title","url","sku","kind","projectId","sourceId","location","version") if k in s} for s in sources if s["id"] in cited],
             "provider":provider,"model":model}

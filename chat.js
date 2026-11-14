@@ -86,13 +86,15 @@
     const kind=s.kind||'official', id=s.id??(index+1), text=s.title||s.sku||l('资料','Record');
     const fromPage=kind==='context'||kind==='page'||(kind==='local'&&!s.sku);
     const type=fromPage?l('当前工作台页面','Current workbench page'):kind==='local'?l('工作台人工资料','Local product record'):
-      kind==='project'?l('定制项目','Project'):l('官方资料','Official source');
+      kind==='project'?l('定制项目','Project'):kind==='internal'?l('内部资料','Internal document'):l('官方资料','Official source');
     const url=kind==='official'?safeOfficial(s.url):'';
     let content=esc(text);
     if(url)content=`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)} ↗</a>`;
     else if(kind==='local'&&s.sku)content=`<a href="#product=${encodeURIComponent(s.sku)}">${esc(text)} ›</a>`;
     else if(kind==='project'&&s.projectId&&app.openProject)content=button('project',text+' ›','data-chat-project="'+esc(s.projectId)+'"');
-    return `<li><span class="sc-ref">[${esc(id)}]</span><span><small>${esc(type)}</small> ${content}</span></li>`;
+    else if(kind==='internal'&&/^[a-f0-9]{24}$/.test(s.sourceId||'')&&window.InternalUI)content=button('internal',text+' ↗','data-chat-source="'+s.sourceId+'" data-chat-location="'+esc(s.location||'')+'" data-chat-version="'+esc(s.version||'')+'"');
+    const location=kind==='internal'?[s.location,s.version?l('版本 ','Version ')+String(s.version).slice(0,12):''].filter(Boolean).join(' · '):'';
+    return `<li><span class="sc-ref">[${esc(id)}]</span><span><small>${esc(type)}</small> ${content}${location?`<small>${esc(location)}</small>`:''}</span></li>`;
   }
   function contextLine(ctx,sku){
     const names=viewNames(), tabs=tabNames(), main=ctx?.sku||sku;
@@ -295,6 +297,7 @@
       case 'settings':close();app.openSettings?.();break;
       case 'evidence':close();app.openEvidence?.();break;
       case 'project':if(app.openProject?.(btn.dataset.chatProject))close();break;
+      case 'internal':window.InternalUI?.openSource(btn.dataset.chatSource,btn.dataset.chatLocation||'',btn.dataset.chatVersion||'');break;
       case 'retry':{const a=attempts.get(active);if(a?.state==='failed'&&hot()&&connected)deliver(active,a);break;}
     }
   }

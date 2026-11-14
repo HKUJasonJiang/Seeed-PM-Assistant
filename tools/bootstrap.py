@@ -6,6 +6,9 @@ import struct
 import sys
 import time
 
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from startup_report import record, failure
+
 ROOT=Path(__file__).resolve().parents[1]
 VENV=ROOT/".venv"
 VENV_PYTHON=VENV/"Scripts"/"python.exe"
@@ -47,30 +50,61 @@ def verify():
             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
 
 
+def install(command, default_code):
+    result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,encoding="utf-8",errors="replace")
+    if result.returncode==0:return
+    output=result.stdout.casefold()
+    code=default_code
+    if "certificate_verify_failed" in output or "certificate verify failed" in output:code="CERTIFICATE"
+    elif any(text in output for text in ("proxyerror","connection","timed out","network is unreachable","temporary failure","getaddrinfo")):code="NETWORK"
+    elif "no matching distribution" in output or "could not find a version" in output:code="PACKAGE"
+    elif "access is denied" in output or "permission denied" in output:code="ACCESS"
+    record(code,"exit="+str(result.returncode))
+    raise RuntimeError("STARTUP_STEP_FAILED")
+
+
 def main():
     if sys.argv[1:]==["--verify"]:return 0 if ready() else 1
     sys.path.insert(0,str(Path(__file__).resolve().parent))
     from launch import arguments, open_existing
     args=arguments()
+    record("START",sys.implementation.name+" "+sys.version.split()[0]+" "+str(struct.calcsize("P")*8)+"-bit",reset=True)
+    required=("index.html","data/catalog.js","backend/server.py","tools/launch.py","requirements.txt")
+    if any(not (ROOT/name).is_file() for name in required):
+        record("FILES");return 1
     already=open_existing(args)
-    if already is not None:return already
+    if already is not None:
+        if args.install_dependencies:record("BUSY");return 2
+        return already
+    if not args.install_dependencies:
+        complete=verify()
+        record("READY" if complete else "BASIC")
+        interpreter=str(VENV_PYTHON) if complete else sys.executable
+        return subprocess.run([interpreter,"-I","-B",str(ROOT/"tools"/"launch.py"),*sys.argv[1:]],cwd=ROOT).returncode
     try:
         with setup_lock():
             if not verify():
                 probe=[str(VENV_PYTHON),"-I","-c","import sys,struct;sys.exit(0 if sys.version_info[:2] in ((3,12),(3,13)) and struct.calcsize('P')==8 else 1)"]
                 usable=VENV_PYTHON.is_file() and subprocess.run(probe,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
                 if not usable:
-                    print("Setting up this project's Python environment...",flush=True)
-                    subprocess.run([sys.executable,"-I","-B","-m","venv",str(VENV)],check=True)
-                print("Installing the two required packages from your configured Python package source...",flush=True)
-                subprocess.run([str(VENV_PYTHON),"-I","-B","-m","pip","--disable-pip-version-check","install","--only-binary=:all:","--force-reinstall","-r",str(REQUIREMENTS)],check=True)
+                    record("VENV")
+                    install([sys.executable,"-I","-B","-m","venv",str(VENV)],"PYTHON")
+                has_pip=subprocess.run([str(VENV_PYTHON),"-I","-B","-c","import pip"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+                if not has_pip:
+                    record("PIP_REPAIR")
+                    install([str(VENV_PYTHON),"-I","-B","-m","ensurepip","--upgrade"],"PYTHON")
+                record("PACKAGES")
+                install([str(VENV_PYTHON),"-I","-B","-m","pip","--disable-pip-version-check","install","--only-binary=:all:","--force-reinstall","--retries","2","--timeout","25","-r",str(REQUIREMENTS)],"PACKAGE")
                 if not verify():raise RuntimeError("Python could not import the installed packages. Check your Python installation and try again.")
+        record("READY")
         return subprocess.run([str(VENV_PYTHON),"-I","-B",str(ROOT/"tools"/"launch.py"),*sys.argv[1:]],cwd=ROOT).returncode
     except (subprocess.CalledProcessError,OSError,RuntimeError) as exc:
-        print("启动准备未完成。请确认已全部解压到可写文件夹，并请 IT 检查 Python 及依赖下载权限。修复后重新双击启动助手，或先打开 index.html 只读查商品。",file=sys.stderr)
-        print("Setup could not finish. Check write access to this folder, Python 3.12/3.13, and access to your approved package source.",file=sys.stderr)
-        if isinstance(exc,RuntimeError):print(str(exc),file=sys.stderr)
+        failure(exc,"ACCESS" if isinstance(exc,PermissionError) else "FAILED")
         return 1
 
 
-if __name__=="__main__":raise SystemExit(main())
+if __name__=="__main__":
+    try:raise SystemExit(main())
+    except (OSError,ValueError,RuntimeError) as exc:
+        failure(exc,"ACCESS" if isinstance(exc,PermissionError) else "FAILED")
+        raise SystemExit(1) from None

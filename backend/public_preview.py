@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from .storage import ROOT
 
 
-ASSETS={"index.html","app.css","app.js","search.js","product-ui.js","workbench.css","chat.css","locale.js"}
+ASSETS={"index.html","app.css","app.js","search.js","product-ui.js","workbench.css","chat.css","locale.js","internal-ui.js","internal-ui.css","data/accessory-lookup.js"}
 TYPES={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".jpg":"image/jpeg"}
 
 

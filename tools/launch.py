@@ -16,6 +16,9 @@ from urllib.parse import parse_qs,urlsplit
 from urllib.request import ProxyHandler,Request,build_opener
 import webbrowser
 
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from startup_report import console, record, failure
+
 ROOT=Path(__file__).resolve().parents[1]
 HTTP=build_opener(ProxyHandler({}))
 DEFAULT_PORT=8765
@@ -26,6 +29,8 @@ def arguments():
     parser.add_argument("--port",type=int,help="Request this exact port (defaults to 8765, with automatic fallback)")
     parser.add_argument("--data-dir",type=Path,default=ROOT/".local-workbench")
     parser.add_argument("--no-browser",action="store_true")
+    parser.add_argument("--diagnose",action="store_true",help="Write a safe startup report")
+    parser.add_argument("--install-dependencies",action="store_true",help="Prepare optional image and store-update tools")
     parser.add_argument("--stop",action="store_true")
     parser.add_argument("--serve",action="store_true",help=argparse.SUPPRESS)
     args=parser.parse_args()
@@ -78,7 +83,11 @@ def open_existing(args):
         return 1
     url=address(rec["port"])+"/"
     print(url,flush=True)
-    if not args.no_browser:webbrowser.open(url)
+    record("OPEN")
+    if not args.no_browser:
+        try:opened=webbrowser.open(url)
+        except (OSError,webbrowser.Error):opened=False
+        if not opened:record("BROWSER")
     return 0
 
 
@@ -128,16 +137,25 @@ def stop(args):
 
 def serve(args):
     sys.path.insert(0,str(ROOT))
-    from backend.server import Handler,create
-    from backend.storage import Problem,packed,write
+    try:
+        from backend.server import Handler,create
+        from backend.storage import Problem,packed,write
+    except (ImportError,OSError,ValueError) as exc:
+        failure(exc);return 1
     try:
         try:server=create(args.port or DEFAULT_PORT,args.data_dir,ROOT)
         except OSError:
             if args.port is not None:raise
             server=create(0,args.data_dir,ROOT)
     except Problem as e:
+        record("BUSY" if e.code=="ALREADY_RUNNING" else "FAILED",e.code if re.fullmatch("[A-Z_]{1,45}",e.code) else "SERVICE_INIT")
         return 3 if e.code=="ALREADY_RUNNING" else 1
-    except OSError:return 4
+    except OSError as exc:
+        port_error=(getattr(exc,"winerror",None) or getattr(exc,"errno",None)) in {10048,10013}
+        failure(exc,"PORT" if port_error else "ACCESS")
+        return 4 if port_error else 1
+    except (ValueError,KeyError,TypeError) as exc:
+        failure(exc);return 1
     rec={"folder":identity(args.data_dir),"port":server.server_port,"secret":secrets.token_hex(32)}
     gate=threading.Lock()
     active=0
@@ -189,16 +207,22 @@ def serve(args):
 
 
 def launch():
+    console()
     args=arguments()
     if args.serve:return serve(args)
     if args.stop:return stop(args)
     existing=open_existing(args)
     if existing is not None:return existing
+    record("SERVICE")
     command=[sys.executable,"-I","-B",str(Path(__file__).resolve()),"--serve","--data-dir",str(args.data_dir)]
     if args.port is not None:command.extend(["--port",str(args.port)])
     child=subprocess.Popen(command,cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                            creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
-    until=time.monotonic()+28
+    return await_startup(args,child)
+
+
+def await_startup(args,child):
+    until=time.monotonic()+60
     while time.monotonic()<until:
         existing=open_existing(args)
         if existing is not None:return existing
@@ -206,12 +230,19 @@ def launch():
         if code is not None and code!=3:break
         if code==3 and not read_record(args.data_dir):
             # Concurrent launch can briefly hold the instance lock before its marker is written.
-            if time.monotonic()>until-24:break
+            if time.monotonic()>until-56:break
         time.sleep(.2)
-    if child.poll()==4:print("This port is unavailable. Close the other application or start without --port to choose an available port.",file=sys.stderr)
-    elif child.poll()==3:print("Another service already uses this data folder. Finish its work, then stop the previous service before starting this version.",file=sys.stderr)
-    else:print("Could not start the workbench. Check folder access and that data/catalog.js was extracted with the application.",file=sys.stderr)
+    if child.poll() is None:
+        record("STARTING")
+        return 2
+    if child.poll()==4:record("PORT")
+    elif child.poll()==3:record("BUSY")
+    else:record("FAILED","service_exit="+str(child.poll()))
     return 1
 
 
-if __name__=="__main__":raise SystemExit(launch())
+if __name__=="__main__":
+    try:raise SystemExit(launch())
+    except Exception as exc:
+        failure(exc)
+        raise SystemExit(1) from None

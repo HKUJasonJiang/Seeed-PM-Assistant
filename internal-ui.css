@@ -1,0 +1,52 @@
+.internal-eol-text {text-decoration:line-through;text-decoration-thickness:1.5px;color:#80695e;}
+.internal-eol-badge {display:inline-block;font-size:11px;line-height:1.6;font-weight:600;color:#915323;background:#fbefd9;border:1px solid #e9d5ae;border-radius:4px;padding:0 5px;vertical-align:middle;text-decoration:none;white-space:nowrap;}
+.internal-eol-notice {border-left:3px solid #bb833b;background:#fff8eb;padding:12px 14px;margin:14px 0;font-size:13px;}
+.internal-eol-notice p {margin:3px 0 8px;}
+.internal-record-text {white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.65;}
+.internal-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:7px 18px;margin:7px 0;font-size:13px;}
+.internal-fields>div {min-width:0;}
+.internal-fields dt {font-size:11px;color:var(--sub);}
+.internal-fields dd {margin:0;overflow-wrap:anywhere;white-space:pre-wrap;}
+.internal-source {border:0;background:none;padding:2px 0;color:var(--green);text-align:left;font-size:12px;overflow-wrap:anywhere;cursor:pointer;}
+.internal-source:hover {text-decoration:underline;}
+.internal-provenance {display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-top:7px;font-size:11px;color:var(--sub);}
+.internal-product-records {margin:18px 0 5px;padding:14px 16px;border:1px solid #d9dfd2;border-radius:9px;background:#fafbf6;}
+.internal-product-records h3,.internal-project-review h3 {font-size:16px;margin:0 0 10px;}
+.internal-record {padding:12px 0;border-bottom:1px solid var(--line);}
+.internal-record:last-child {border-bottom:0;}
+.internal-record-heading {display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:5px;font-size:14px;}
+.internal-record-heading>span {color:var(--sub);font-size:11px;white-space:nowrap;}
+.internal-record-products {display:flex;flex-wrap:wrap;gap:8px 14px;margin:6px 0 18px;}
+.internal-import {display:flex;align-items:end;gap:12px;margin-top:15px;}
+.internal-import .wb-field {flex:1;min-width:0;}
+.internal-import input {width:100%;}
+.internal-import>button {margin-bottom:0;}
+.internal-stats {display:flex;flex-wrap:wrap;gap:8px 22px;margin:17px 0 5px;color:var(--sub);font-size:13px;}
+.internal-stats b {color:var(--ink);margin-left:5px;}
+.internal-error {color:#983e26;overflow-wrap:anywhere;}
+.internal-status {color:var(--green);}
+.internal-documents {padding-left:19px;}
+.internal-documents li {margin-bottom:10px;overflow-wrap:anywhere;}
+.internal-documents small {display:block;color:var(--sub);font-size:11px;}
+.internal-source-dialog {width:min(900px,calc(100vw - 28px));max-height:85vh;border:1px solid var(--line);border-radius:12px;padding:0;color:var(--ink);background:white;box-shadow:0 20px 70px #172c2740;}
+.internal-source-dialog::backdrop {background:#152b2859;}
+.internal-source-heading {display:flex;justify-content:space-between;align-items:center;gap:15px;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:white;}
+.internal-source-heading h2 {font-size:17px;margin:0;overflow-wrap:anywhere;}
+#internal-source-content {padding:0 20px 20px;}
+#internal-source-content pre {font:13px/1.65 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;overflow-wrap:anywhere;}
+#internal-source-content mark {background:#eef1b9;color:inherit;}
+.internal-project-review {padding:14px 16px;border:1px solid #dfd6bc;border-radius:8px;background:#fffaf0;}
+.internal-project-review[hidden] {display:none;}
+.internal-assessment {padding:9px 0;border-top:1px solid #e8dfc7;font-size:13px;}
+.internal-assessment ul {margin:5px 0;padding-left:20px;}
+.internal-confirmations {margin-top:8px;}
+.internal-candidates {padding-left:0;list-style:none;}
+.internal-candidates li {padding:9px 0;border-top:1px solid #e8dfc7;}
+.internal-candidate-actions {display:flex;gap:7px;flex-wrap:wrap;margin:5px 0;}
+.wb-materials {padding:10px 12px;background:var(--pale);border-radius:7px;font-size:13px;}
+.wb-materials ul {padding-left:18px;margin:6px 0;}
+.wb-materials li {margin:6px 0;}
+.wb-materials li>span {margin-inline:8px;color:var(--sub);}
+.wb-material-quantity {display:inline-flex;align-items:center;gap:5px;}
+.wb-material-quantity input {width:64px;padding:3px 5px;font-size:13px;}
+@media(max-width:650px){.internal-import {align-items:stretch;flex-direction:column;}.internal-record-heading {align-items:start;flex-direction:column;gap:3px;}.internal-source-dialog {max-height:90vh;}.internal-source-heading,#internal-source-content {padding-inline:13px;}.internal-product-records {padding:11px;}}

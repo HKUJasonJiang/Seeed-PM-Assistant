@@ -18,16 +18,22 @@ const builtInProductText={
 function localizedProductText(value,lang){
   return lang==='en'?(builtInProductText[value]||value||''):(value||'');
 }
-function mergeProductData(base,overrides){
+function mergeProductData(base,overrides,internalProducts={}){
   const patches=new Map(Object.values(overrides||{}).map(p=>[p.sku.toLowerCase(),p]));
+  const internal=new Map(Object.entries(internalProducts||{}).map(([sku,p])=>[sku.toLowerCase(),p]));
   const defaults={name:'',url:'',groups:[],paths:[],parts:[],attributes:[],notes:[],docs:[],summary:'',accessories:[],wikiLinks:[],wikiEvidence:[]};
   const products=base.products.map(p=>{
     const key=p.sku.toLowerCase(),patch=patches.get(key);
-    if(!patch)return p;
+    const knowledge=internal.get(key);internal.delete(key);
     patches.delete(key);
-    return {...p,...patch,isEdited:true,sku:p.sku};
+    if(!patch&&!knowledge)return p;
+    return {...p,...patch,...(patch?{isEdited:true}:{}),sku:p.sku,...(knowledge?{internal:knowledge}:{})};
   });
-  for(const patch of patches.values())products.push({...defaults,...patch,isEdited:true,isLocal:true});
+  for(const patch of patches.values()){
+    const knowledge=internal.get(patch.sku.toLowerCase());internal.delete(patch.sku.toLowerCase());
+    products.push({...defaults,...patch,isEdited:true,isLocal:true,...(knowledge?{internal:knowledge,isInternal:!!knowledge.internalOnly}:{})});
+  }
+  for(const [sku,knowledge] of internal)products.push({...defaults,sku:knowledge.sku||sku,name:knowledge.name||knowledge.sku||sku,isLocal:true,isInternal:true,internal:knowledge});
   return {...base,products};
 }
 

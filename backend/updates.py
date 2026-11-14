@@ -378,6 +378,9 @@ class Updates:
     def details(self,db):
         self.ensure_base(db)
         old=self.store.by_sku
+        from .accessory_checks import attach_checks, read_reports
+        accessory_reports=read_reports(self.store.root)
+        accessory_reports.update(self.get(db,"accessoryReports",{}))
         total=db.execute("SELECT COUNT(*) FROM pending").fetchone()[0]
         completed=db.execute("SELECT COUNT(*) FROM pending WHERE done=1").fetchone()[0]
         self.set(phase="details",done=completed,total=total)
@@ -438,6 +441,11 @@ class Updates:
             if observed:merged["detailAudit"]=observed
             from .r1000_evidence import enrich_r1000
             enrich_r1000(merged,old)
+            try:
+                attach_checks(merged,old,self.remote,accessory_reports)
+            finally:
+                self.put(db,"accessoryReports",accessory_reports)
+                db.commit()
             merged["image"]=""
             if p["imageUrl"]:
                 try:

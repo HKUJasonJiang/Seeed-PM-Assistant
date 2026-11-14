@@ -168,27 +168,39 @@ class Store:
         if not source.startswith(CATALOG_PREFIX):
             raise ValueError("Invalid Seeed catalogue")
         self.catalog = json.loads(source[len(CATALOG_PREFIX):].rstrip(";"))
+        from .internal_knowledge import InternalKnowledge
+        self.internal = InternalKnowledge(self.local)
+        self.internal.load()
         self.reindex()
 
     def reindex(self):
         self.by_sku = {p["sku"].casefold():p for p in self.catalog["products"]}
         self.custom_evidence={p["sku"]:info for p in self.catalog["products"] if (info:=customization_info(p))}
         self.official_custom_skus=set(self.custom_evidence)
+        self.internal.apply(self.catalog)
 
     def effective(self, sku):
         if not isinstance(sku, str):
             raise Problem("INVALID_SKU")
         original = self.by_sku.get(sku.casefold(), {})
+        internal = next((p for code,p in self.internal.products.items() if code.casefold()==sku.casefold()), None)
+        if not original and internal:
+            original = {"sku": internal["sku"], "name": internal["name"], "url": "", "image": "",
+                        "groups": [], "paths": [], "summary": "", "parts": [], "accessories": [],
+                        "notes": [], "docs": [], "wikiLinks": [], "internalOnly": True}
         canonical = original.get("sku") or next((k for k in self.state["overrides"] if k.casefold()==sku.casefold()), sku)
         override = self.state["overrides"].get(canonical, {})
         if not original and not override:
             raise Problem("UNKNOWN_SKU", 404)
-        return {**original, **override}
+        return {**original, **override, **({"internal": internal} if internal else {})}
 
     def public(self):
         with self.lock:
+            self.internal.load()
+            self.internal.apply(self.catalog)
             s = self.state
             return {"csrf":self.csrf, "language":s["language"], "provider":s["provider"],
+                    "internalProducts":self.internal.products, "internalSummary":self.internal.summary(),
                     "customizableSkus":sorted(self.official_custom_skus|{sku for sku,p in s["overrides"].items() if p.get("customConfirmed") is True}),
                     "customEvidence":copy.deepcopy(self.custom_evidence),
                     "providers":{k:{"model":s["models"][k], "hasKey":bool(s["vault"].get(k))} for k in PROVIDERS},
@@ -259,6 +271,27 @@ class Store:
         item = {"id":requested or uuid.uuid4().hex, "title":field(body.get("title"),200,True),
                 "description":field(body.get("description",""),12000), "labels":strings(body.get("labels",[]),30),
                 "skus":list(dict.fromkeys(p["sku"] for p in members))}
+        materials = body.get("materials",(current or {}).get("materials",[]))
+        if not isinstance(materials,list) or len(materials)>50:raise Problem("INVALID_MATERIALS")
+        item["materials"] = []
+        for material in materials:
+            if not isinstance(material,dict):raise Problem("INVALID_MATERIALS")
+            material_sku = self.effective(material.get("sku"))["sku"]
+            host = material.get("hostSku")
+            action = material.get("action")
+            count = material.get("quantity",1)
+            if host not in item["skus"] or action not in {"replace","add"} or type(count) is not int or not 1<=count<=999:
+                raise Problem("INVALID_MATERIALS")
+            entry = {"sku":material_sku,"hostSku":host,"action":action,"quantity":count}
+            previous = next((m for m in (current or {}).get("materials",[])
+                             if all(m.get(k)==entry[k] for k in ("sku","hostSku","action"))),None)
+            evidence = (previous or {}).get("evidence")
+            if evidence is None:
+                material_record = self.internal.products.get(material_sku,{})
+                evidence = [{k:r[k] for k in ("sourceId","location","version","text")}
+                            for r in material_record.get("records",[]) if r["kind"]=="identity"][:3]
+            if evidence:entry["evidence"]=evidence
+            if entry not in item["materials"]:item["materials"].append(entry)
         if current: state["projects"][state["projects"].index(current)] = item
         else: state["projects"].append(item)
 

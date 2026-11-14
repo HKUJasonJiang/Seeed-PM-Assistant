@@ -41,9 +41,12 @@
   const pageTitle = (name, desc) => `<div class="page-title"><h1>${esc(name)}</h1><p>${esc(desc)}</p></div>`;
   const input = (id, label, value, attrs='') => `<label class="wb-field"><span>${esc(label)}</span><input id="${id}" value="${esc(value)}" ${attrs}></label>`;
   const source = (url, label) => safeUrl(url) ? `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>` : '';
-  const open = (p, label='') => txt('open', label || p.name, attr('sku',p.sku));
+  const productLabel=(p,value,badge=true)=>window.InternalUI?.label(p,value,app.lang(),badge)||esc(value);
+  const open = (p, label='') => `<button type="button" class="wb-text" data-wb-action="open" ${attr('sku',p.sku)}>${productLabel(p,label||p.name)}</button>`;
+  const prepareTools=()=>L('请完成当前任务并停止助手，双击“准备更新工具.cmd”，再重新启动助手。','Finish current tasks and stop the assistant, run “Prepare Data Tools.cmd”, then start the assistant again.');
   const uniq = array => [...new Set(array)];
   const splitList = s => uniq(s.split(/[,，;；\n]+/).map(x=>x.trim()).filter(Boolean));
+  const materialChoice=({sku,hostSku,action,quantity})=>({sku,hostSku,action,quantity});
   const noticeBox = () => `<div id="wb-notice" role="status" aria-live="polite" class="wb-notice${ui.noticeError?' wb-error':''}" ${ui.notice?'':'hidden'}>${esc(ui.notice)}</div>`;
   function notify(message, error=false) {
     ui.notice=message;ui.noticeError=error;
@@ -56,6 +59,7 @@
   }
   function errorText(err) {
     const code=String(err?.code || err?.message || '').toLowerCase();
+    if(code==='image_runtime_required'||code==='update_runtime_required')return prepareTools();
     if(/csrf|unauthor|origin|session/.test(code))return L('会话已过期，请刷新页面后重试。','The session expired. Reload the page and try again.');
     if(/sku.*exist|duplicate/.test(code))return L('此 SKU 已存在，请在“编辑产品”中打开。','This SKU already exists. Open it in Edit product.');
     if(/custom|ineligible/.test(code))return L('所选 SKU 需要公开的定制依据，或先在产品编辑中人工确认。','The SKU needs documented customization support or manual confirmation in the product editor.');
@@ -104,7 +108,7 @@
     const expanded=favoritesOpen();
     const toggleName=expanded?L('收起收藏夹','Collapse favorites'):L('展开收藏夹','Expand favorites');
     app.sidebar.innerHTML=`<div class="wb-side-label"><button id="wb-fav-toggle" type="button" aria-label="${toggleName}" title="${toggleName}" aria-expanded="${expanded}" aria-controls="wb-fav-list"><span aria-hidden="true"></span></button>${txt('favorites',L('收藏夹','Favorites'))}<span>${items.length}</span></div><div id="wb-fav-list" ${expanded?'':'hidden'}>`+
-      (items.length?`<ul>${items.slice(0,6).map(p=>`<li>${txt('open',p.name,attr('sku',p.sku)+' title="'+esc(p.sku+' · '+p.name)+'"')}</li>`).join('')}</ul>`
+      (items.length?`<ul>${items.slice(0,6).map(p=>`<li>${open(p)}</li>`).join('')}</ul>`
                     :`<small>${L('在产品卡片点 ☆ 收藏','Choose ☆ on a product card to save it.')}</small>`)+
       (items.length>6?txt('favorites',L('查看全部收藏','View all favorites')):'')+'</div>';
   }
@@ -138,16 +142,16 @@
       <select id="wb-target-project" aria-label="${L('目标定制需求','Target project')}"><option value="">${L('新建定制需求','New project')}</option>${opts}</select>
       ${primary('favorites-project',L('加入定制需求','Add to project')+(count?' ('+count+')':''),count?'':'disabled')}</div>
       <ul class="wb-products">${list.map(p=>`<li><input aria-label="${esc(L('选择 ','Select ')+p.sku)}" type="checkbox" data-wb-fav-check="${esc(p.sku)}" ${ui.selectedFavorites.has(p.sku)?'checked':''} ${eligible(p)?'':'disabled'}>
-      ${thumb(p)}<div class="wb-item-name">${open(p)}<small>${esc(p.sku)} · ${eligible(p)?L('可定制','Customization available'):L('定制能力未确认','Customization unconfirmed')}</small></div>
+      ${thumb(p)}<div class="wb-item-name">${open(p)}<small>${productLabel(p,p.sku,false)} · ${eligible(p)?L('可定制','Customization available'):L('定制能力未确认','Customization unconfirmed')}</small></div>
       ${eligible(p)?txt('custom-for',L('相关定制','Customization'),attr('sku',p.sku)):''}${txt('star',L('取消收藏','Remove'),attr('sku',p.sku))}</li>`).join('')}</ul></div>`:
       `<div class="panel wb-panel wb-empty"><p>${L('收藏夹为空。打开一个产品，再点“☆ 收藏”。','No saved products yet. Open a product and choose ☆ Save.')}</p>${button('catalog',L('打开产品目录','Browse catalog'))}</div>`);
   }
   function newDraft(skus=[]) {
-    return {id:'',title:'',description:'',labels:'',skus:uniq(skus),picker:''};
+    return {id:'',title:'',description:'',labels:'',skus:uniq(skus),materials:[],picker:''};
   }
   function editProject(id) {
     const p=projects().find(x=>x.id===id);if(!p)return;
-    ui.projectDraft={id:p.id,title:p.title,description:p.description||'',labels:(p.labels||[]).join(', '),skus:[...(p.skus||[])],picker:''};
+    ui.projectDraft={id:p.id,title:p.title,description:p.description||'',labels:(p.labels||[]).join(', '),skus:[...(p.skus||[])],materials:(p.materials||[]).map(m=>({...m})),picker:''};
   }
   function openProject(id){
     if(!projects().some(p=>p.id===id))return false;
@@ -160,7 +164,7 @@
   function projectChoices() {
     const d=ui.projectDraft;if(!d)return '';
     const options=customProducts().filter(p=>!d.skus.includes(p.sku)&&match(p,d.picker));
-    return options.slice(0,8).map(p=>button('member-add',p.sku+' · '+p.name,attr('sku',p.sku))).join('')||
+    return options.slice(0,8).map(p=>`<button type="button" class="wb-button" data-wb-action="member-add" ${attr('sku',p.sku)}>${productLabel(p,p.sku+' · '+p.name)}</button>`).join('')||
       `<small>${L('没有匹配的可定制产品。','No eligible products match.')}</small>`;
   }
   function projectEditor(){
@@ -169,9 +173,12 @@
       ${input('wb-project-title',L('需求标题','Project title'),d.title,'required maxlength="180" data-wb-draft="title"')}
       <label class="wb-field"><span>${L('需求描述','Requirements')}</span><textarea id="wb-project-description" rows="3" maxlength="12000" data-wb-draft="description">${esc(d.description)}</textarea></label>
       ${input('wb-project-labels',L('标签（逗号分隔）','Labels (comma-separated)'),d.labels,'maxlength="2000" data-wb-draft="labels"')}
-      <div><b>${L('关联产品','Linked products')}</b><div class="wb-chips">${d.skus.map(s=>`<span>${esc(s)} ${txt('member-remove','×',attr('sku',s)+' aria-label="'+esc(L('移除 ','Remove ')+s)+'"')}</span>`).join('')||`<small>${L('请至少选择一个可定制 SKU。','Choose at least one eligible SKU.')}</small>`}</div>
+      <div><b>${L('关联产品','Linked products')}</b><div class="wb-chips">${d.skus.map(s=>`<span>${productLabel(getProduct(s),s)} ${txt('member-remove','×',attr('sku',s)+' aria-label="'+esc(L('移除 ','Remove ')+s)+'"')}</span>`).join('')||`<small>${L('请至少选择一个可定制 SKU。','Choose at least one eligible SKU.')}</small>`}</div>
       ${input('wb-member-search',L('查找可定制产品','Find an eligible product'),d.picker,'data-wb-draft="picker"')}
       <div id="wb-member-options" class="wb-picker">${projectChoices()}</div></div>
+      ${materialsMarkup(d.materials,true)}
+      ${d.skus.map(getProduct).filter(p=>p?.internal?.eol).map(p=>window.InternalUI?.product(p,app.lang(),'summary')||'').join('')}
+      <div id="internal-project-review" class="internal-project-review" aria-live="polite" hidden></div>
       <div class="wb-actions"><button class="wb-button wb-primary" type="submit">${L('保存定制需求','Save project')}</button></div></form>`;
   }
   function projectCards(){
@@ -180,7 +187,23 @@
     return `<div class="wb-project-list">${list.map(p=>`<article><div class="wb-heading"><h3>${esc(p.title)}</h3><div>${txt('edit-project',L('编辑','Edit'),attr('id',p.id))} ${txt('delete-project',L('删除','Delete'),attr('id',p.id))}</div></div>
       ${p.description?`<p>${esc(p.description)}</p>`:''}
       ${(p.labels||[]).length?`<div class="wb-chips">${p.labels.map(s=>`<span>${esc(s)}</span>`).join('')}</div>`:''}
-      <div class="wb-members">${p.skus.map(s=>{const m=getProduct(s);return m?open(m,s+' · '+m.name):esc(s);}).join('')}</div></article>`).join('')}</div>`;
+      <div class="wb-members">${p.skus.map(s=>{const m=getProduct(s);return m?open(m,s+' · '+m.name):esc(s);}).join('')}</div>${materialsMarkup(p.materials)}</article>`).join('')}</div>`;
+  }
+  function materialsMarkup(materials=[],editable=false){
+    if(!materials.length)return '';
+    return `<section class="wb-materials"><b>${L('已选定物料','Selected materials')}</b><ul>${materials.map((m,index)=>{
+      const p=getProduct(m.sku),name=p?open(p,m.sku+' · '+p.name):esc(m.sku);
+      const quantity=editable?`<label class="wb-material-quantity">${L('数量','Quantity')} <input id="wb-material-quantity-${index}" type="number" min="1" max="999" step="1" required data-wb-material-quantity="${index}" value="${Number(m.quantity)||1}" aria-label="${esc(L('物料数量 ','Quantity for ')+m.sku)}"></label>`:`× ${Number(m.quantity)||1}`;
+      return `<li>${name} <span>${quantity} · ${L('主机','Host')} ${esc(m.hostSku)} · ${m.action==='add'?L('新增','Add'):L('替换','Replace')}</span>${editable?txt('material-remove',L('移除','Remove'),attr('id',index)):''}${(m.evidence||[]).length?`<div class="internal-provenance">${m.evidence.map(r=>window.InternalUI?.sourceButton({...r,title:L('物料依据','Material source')},app.lang())||'').join(' ')}</div>`:''}</li>`;
+    }).join('')}</ul></section>`;
+  }
+  function addMaterial(material){
+    const d=ui.projectDraft;if(!d||!d.skus.includes(material.hostSku)||!['add','replace'].includes(material.action))return;
+    d.materials=d.materials||[];
+    const existing=d.materials.findIndex(m=>m.sku===material.sku&&m.hostSku===material.hostSku&&m.action===material.action);
+    if(existing!==-1){document.getElementById('wb-material-quantity-'+existing)?.focus();return;}
+    d.materials.push({sku:material.sku,hostSku:material.hostSku,action:material.action,quantity:1});
+    redraw();app.onNavigationChange?.('replace');
   }
   function filteredEligible(){
     return customProducts().filter(p=>(!ui.filterSku||ui.filterSku===p.sku)&&match(p,ui.customFilter));
@@ -190,7 +213,7 @@
     const last=Math.max(1,Math.ceil(list.length/pageSize));ui.customPage=Math.min(ui.customPage,last);
     return `<ul class="wb-products">${list.slice((ui.customPage-1)*pageSize,ui.customPage*pageSize).map(p=>{
       const info=customInfo(p);
-      return `<li>${thumb(p)}<div class="wb-item-name">${open(p)}<small>${esc(p.sku)} · ${esc(info.kind)} ${source(info.url,L('来源','Source'))}</small><p>${esc(info.text)}</p></div>
+      return `<li>${thumb(p)}<div class="wb-item-name">${open(p)}<small>${productLabel(p,p.sku,false)} · ${esc(info.kind)} ${source(info.url,L('来源','Source'))}</small><p>${esc(info.text)}</p></div>
         ${txt('new-from-sku',L('创建需求','New project'),attr('sku',p.sku))}</li>`;
     }).join('')}</ul>${list.length?'':`<p class="wb-empty">${L('没有符合条件的产品。','No matching eligible products.')}</p>`}
     ${last>1?`<div class="wb-pager">${button('custom-prev',L('上一页','Previous'),ui.customPage===1?'disabled':'')}<small>${ui.customPage} / ${last}</small>${button('custom-next',L('下一页','Next'),ui.customPage===last?'disabled':'')}</div>`:''}`;
@@ -198,7 +221,7 @@
   function customPage(){
     const p=ui.filterSku && getProduct(ui.filterSku);
     return pageTitle(L('定制服务','Customization'),L('管理客户的定制需求，关联有官方依据或经人工确认的 SKU。','Manage customer requirements with documented or manually confirmed products.'))+
-      (p?`<div class="wb-filter-chip">${esc(p.sku+' · '+p.name)} ${txt('clear-custom',L('查看全部','Show all'))}</div>`:'')+
+      (p?`<div class="wb-filter-chip">${productLabel(p,p.sku+' · '+p.name)} ${txt('clear-custom',L('查看全部','Show all'))}</div>`:'')+
       (ui.projectDraft?projectEditor():'')+
       `<section class="panel wb-panel"><div class="wb-heading"><h2>${L('定制需求','Projects')}</h2>${primary('new-project',L('新建需求','New project'))}</div>${projectCards()}</section>
       <section class="panel wb-panel"><div class="wb-heading"><h2>${L('可定制产品','Eligible products')}</h2>
@@ -231,7 +254,7 @@
     const q=ui.editorQuery.trim();
     if(!q) return '';
     const list=products().filter(p=>match(p,q)).sort((a,b)=>Number(b.sku.toLowerCase()===q.toLowerCase())-Number(a.sku.toLowerCase()===q.toLowerCase())).slice(0,7);
-    return list.map(p=>button('edit-sku',p.sku+' · '+p.name,attr('sku',p.sku))).join('')||
+    return list.map(p=>`<button type="button" class="wb-button" data-wb-action="edit-sku" ${attr('sku',p.sku)}>${productLabel(p,p.sku+' · '+p.name)}</button>`).join('')||
       `<small>${L('没有找到现有 SKU。可使用“新增产品”。','No existing SKU found. Use Add product to create one.')}</small>`;
   }
   function imageMatches(){
@@ -257,7 +280,7 @@
       <details class="wb-reuse"><summary>${L('使用目录中已有的主图','Use an existing catalog image')}</summary>
         ${input('wb-image-search',L('搜索图片所属产品','Find the product that owns the image'),ui.imageSearch)}<div id="wb-image-results" class="wb-picker">${imageMatches()}</div></details>
       <label class="wb-field"><span>${L('上传替换图片','Upload a replacement')}</span><input type="file" id="wb-image-file" accept="image/jpeg,image/png,image/webp"></label>
-      <small>${L('支持 JPG、PNG、WebP；上传时转换为一张 JPG 主图。','JPEG, PNG and WebP uploads are saved as one JPEG product image.')}</small></div></div></fieldset>
+      <small>${L('支持 JPG、PNG、WebP；上传时转换为一张 JPG 主图。首次上传前请准备更新工具。','JPEG, PNG and WebP uploads are saved as one JPEG product image. Prepare the data tools before the first upload.')}</small><small>${prepareTools()}</small></div></div></fieldset>
       <fieldset><legend>${L('定制资格','Customization eligibility')}</legend><label><input type="checkbox" id="wb-manual" ${d.manual?'checked':''}> ${L('已人工确认此 SKU 可提供定制服务','I have confirmed that this SKU supports a customization service')}</label>
       ${input('wb-custom-note',L('人工核实的服务或依据','Confirmed service or supporting note'),d.custom,'maxlength="2000" data-wb-editor="custom"')}</fieldset>
       <div class="wb-actions"><button class="wb-button wb-primary" type="submit">${L('保存产品','Save product')}</button></div></form>`;
@@ -361,16 +384,18 @@
       <section class="panel wb-panel"><div class="wb-heading"><div><h2>${L('全量重抓','Refresh entire catalog')}</h2><small>${L('检查全目录，按 SKU 更新公开资料和主图。人工修改、收藏和定制需求继续保留。','Refresh public records and main images across the catalog. Local edits, favorites and projects are preserved.')}</small></div>${button('refresh-all',L('一键全量重抓','Run full refresh'),running?'disabled':'')}</div></section>`;
   }
   function developerPage() {
-    const nav=[['settings',L('语言与 AI','Language & AI')],['products',L('产品编辑','Product editor')],['updates',L('目录更新','Catalog updates')]];
+    const nav=[['settings',L('语言与 AI','Language & AI')],['products',L('产品编辑','Product editor')],['internal',L('内部资料','Internal documents')],['updates',L('目录更新','Catalog updates')]];
     return pageTitle(L('开发者设置','Developer settings'),L('管理本机的 AI 提供商、人工产品资料与目录同步。','Manage local AI settings, product edits and catalog sync.'))+
       `<div class="wb-devtabs" role="tablist">${nav.map(([id,title])=>`<button role="tab" aria-selected="${ui.activeDev===id}" data-wb-action="devtab" ${attr('id',id)}>${esc(title)}</button>`).join('')}</div>`+
-      (ui.activeDev==='products'?productsTab():ui.activeDev==='updates'?updateTab():providerForm());
+      (ui.activeDev==='products'?productsTab():ui.activeDev==='updates'?`<p class="caption">${L('首次更新目录前需准备更新工具。','Prepare the data tools before the first catalog update.')} ${prepareTools()}</p>`+updateTab():ui.activeDev==='internal'?(window.InternalUI?.pane()||''):providerForm());
   }
 
   function paint(){
     if(!app || !customTypes.has(ui.view))return;
     const body=ui.view==='favorites'?favPage():ui.view==='custom'?customPage():developerPage();
     app.view.innerHTML=`<div id="wb-workbench" class="wb-page">${noticeBox()}${body}</div>`;
+    if(ui.view==='developer'&&ui.activeDev==='internal')window.InternalUI?.mount();
+    if(ui.view==='custom'&&ui.projectDraft)window.InternalUI?.project(ui.projectDraft.skus,ui.projectDraft.description,ui.projectDraft.materials);
     app.onContextChange?.();
   }
   function chatContext(view){
@@ -384,7 +409,7 @@
     const context={view,sku:ui.filterSku||'',tab:d?'project':'projects',query:ui.customFilter,page:ui.customPage,total:list.length,visibleSkus:list.slice(start,start+12).map(p=>p.sku)};
     if(d){
       context.projectId=d.id;
-      context.projectDraft={title:d.title.slice(0,180),description:d.description.slice(0,1000),labels:splitList(d.labels).slice(0,8),skus:d.skus.slice(0,8)};
+      context.projectDraft={title:d.title.slice(0,180),description:d.description.slice(0,1000),labels:splitList(d.labels).slice(0,8),skus:d.skus.slice(0,8),materials:(d.materials||[]).slice(0,16).map(materialChoice)};
       context.selectedSkus=context.projectDraft.skus;
     }else{
       context.projectIds=projects().filter(p=>!ui.filterSku||p.skus.includes(ui.filterSku)).slice(0,6).map(p=>p.id);
@@ -406,9 +431,9 @@
       if(d){
         let id=draftIds.get(d);
         if(!id){id=globalThis.crypto?.randomUUID?.()||Date.now()+'-'+Math.random();draftIds.set(d,id);}
-        draftCopies.delete(id);draftCopies.set(id,{...d,skus:[...d.skus]});
+        draftCopies.delete(id);draftCopies.set(id,{...d,skus:[...d.skus],materials:(d.materials||[]).map(m=>({...m}))});
         if(draftCopies.size>16)draftCopies.delete(draftCopies.keys().next().value);
-        result.draft={id,project:d.id,skus:[...d.skus]};
+        result.draft={id,project:d.id,skus:[...d.skus],materials:(d.materials||[]).map(materialChoice)};
       }
       return result;
     }
@@ -426,14 +451,16 @@
       const draft=saved.draft;
       if(draft&&(!draft.project||projects().some(p=>p.id===draft.project))){
         const stored=draftCopies.get(draft.id);
-        if(stored)ui.projectDraft={...stored,skus:[...stored.skus]};
+        if(stored)ui.projectDraft={...stored,skus:[...stored.skus],materials:(stored.materials||[]).map(m=>({...m}))};
         else if(draft.project)editProject(draft.project);
         else ui.projectDraft=newDraft();
         ui.projectDraft.skus=(draft.skus||[]).filter(s=>eligible(getProduct(s)));
+        const evidence=ui.projectDraft.materials||[];
+        ui.projectDraft.materials=(draft.materials||evidence).filter(m=>ui.projectDraft.skus.includes(m.hostSku)).map(m=>({...evidence.find(x=>x.sku===m.sku&&x.hostSku===m.hostSku&&x.action===m.action),...materialChoice(m)}));
         if(stored)draftIds.set(ui.projectDraft,draft.id);
       }
     }else if(view==='developer'){
-      ui.activeDev=['settings','products','updates'].includes(saved.tab)?saved.tab:'settings';
+      ui.activeDev=['settings','products','internal','updates'].includes(saved.tab)?saved.tab:'settings';
       ui.editorQuery=saved.query||'';ui.diffQuery=saved.diffQuery||'';ui.diffPage=Math.max(1,saved.diffPage||1);
       const p=saved.editor&&getProduct(saved.editor);
       ui.editor=p||saved.editor==='new'?defaultEditor(p):null;ui.imageSearch='';
@@ -465,7 +492,7 @@
   async function saveProject(){
     const d=ui.projectDraft;
     if(!d?.skus.length){notify(L('请先添加可定制产品。','Add at least one eligible product.'),true);return;}
-    const payload={title:d.title.trim(),description:d.description.trim(),labels:splitList(d.labels),skus:d.skus};
+    const payload={title:d.title.trim(),description:d.description.trim(),labels:splitList(d.labels),skus:d.skus,materials:(d.materials||[]).map(materialChoice)};
     if(!payload.title){document.getElementById('wb-project-title')?.focus();return;}
     if(d.id)payload.id=d.id;
     await write('/api/project',payload);
@@ -619,7 +646,8 @@
       case 'cancel-project':ui.projectDraft=null;redraw();break;
       case 'clear-custom':ui.filterSku='';ui.customPage=1;redraw();break;
       case 'member-add':if(ui.projectDraft&&eligible(getProduct(sku))){ui.projectDraft.skus=uniq([...ui.projectDraft.skus,sku]);redraw();}break;
-      case 'member-remove':if(ui.projectDraft){ui.projectDraft.skus=ui.projectDraft.skus.filter(s=>s!==sku);redraw();}break;
+      case 'member-remove':if(ui.projectDraft){ui.projectDraft.skus=ui.projectDraft.skus.filter(s=>s!==sku);ui.projectDraft.materials=(ui.projectDraft.materials||[]).filter(m=>m.hostSku!==sku);redraw();}break;
+      case 'material-remove':if(ui.projectDraft){ui.projectDraft.materials.splice(Number(id),1);redraw();}break;
       case 'custom-prev':ui.customPage--;updateDom('wb-eligible-list',eligibleList());break;
       case 'custom-next':ui.customPage++;updateDom('wb-eligible-list',eligibleList());break;
       case 'devtab':ui.activeDev=id;ui.notice='';redraw();app.onNavigationChange?.('push');if(id==='updates')await pollUpdate();break;
@@ -648,12 +676,20 @@
       case 'diff-next':ui.diffPage++;updateDom('wb-diff-list',diffRows());break;
     }
     if(['new-from-sku','new-project','edit-project','cancel-project','clear-custom','custom-prev','custom-next','edit-sku','new-sku','cancel-editor','diff-prev','diff-next'].includes(action))app.onNavigationChange?.('push');
-    else if(['delete-project','member-add','member-remove','star'].includes(action))app.onNavigationChange?.('replace');
+    else if(['delete-project','member-add','member-remove','material-remove','star'].includes(action))app.onNavigationChange?.('replace');
   }
   function onInput(e){
     const el=e.target, id=el.id, val=el.value;
+    if(el.dataset.wbMaterialQuantity!==undefined&&ui.projectDraft){
+      const material=ui.projectDraft.materials?.[Number(el.dataset.wbMaterialQuantity)],quantity=Number(val);
+      const valid=Number.isInteger(quantity)&&quantity>=1&&quantity<=999;
+      el.setCustomValidity(valid?'':L('请填写 1 到 999 的整数。','Enter a whole number from 1 to 999.'));
+      if(material&&valid){material.quantity=quantity;window.InternalUI?.project(ui.projectDraft.skus,ui.projectDraft.description,ui.projectDraft.materials);app.onNavigationChange?.('replace');}
+      return;
+    }
     if(el.dataset.wbDraft && ui.projectDraft){
       ui.projectDraft[el.dataset.wbDraft]=val;
+      if(el.dataset.wbDraft==='description')window.InternalUI?.project(ui.projectDraft.skus,ui.projectDraft.description,ui.projectDraft.materials);
       app.onNavigationChange?.('typing');
       if(el.dataset.wbDraft==='title'||el.dataset.wbDraft==='labels')app.onContextChange?.();
       if(el.dataset.wbDraft==='picker')updateDom('wb-member-options',projectChoices());return;
@@ -736,5 +772,5 @@
       void task('submit:'+e.target.id,e.submitter,handler);
     });
   }
-  window.Workbench={init,render,sidebarFavorites,productActions,openCustomFor,openProject,openSettings,chatContext,navigationState,restoreNavigation,isEligible:eligible,customizationInfo:customInfo};
+  window.Workbench={init,render,sidebarFavorites,productActions,openCustomFor,openProject,openSettings,addMaterial,chatContext,navigationState,restoreNavigation,isEligible:eligible,customizationInfo:customInfo};
 })();

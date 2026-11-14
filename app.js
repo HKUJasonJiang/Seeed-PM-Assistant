@@ -27,12 +27,13 @@
   const t=(zh,en)=>lang==='en'?en:zh;
   const local=v=>localizedProductText(v,lang);
   const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const productLabel=(p,value,badge=true)=>window.InternalUI?.label(search?.bySku.get(String(p?.sku||'').toLowerCase())||p,value,lang,badge)||h(value);
   const num=n=>Number(n||0).toLocaleString(lang==='en'?'en-US':'zh-CN');
   const safe=u=>typeof u==='string'&&(/^https?:\/\//i.test(u)||/^(?:data\/jpg\/|\/user-images\/)[a-z\d._-]+$/i.test(u));
   const link=(url,label,cls='')=>safe(url)?`<a class="${cls}" href="${h(url)}" target="_blank" rel="noopener noreferrer">${h(label)}</a>`:'';
   const short=p=>p.name.match(/^reComputer\s+(?:(?:Industrial|Super|Robotics|Rugged)\s+)?[JR]\d+(?:-\d+)?(?:\s*\(w\/o power adapter\))?/i)?.[0]||p.name;
   const photo=(p,cls='')=>`<div class="photo ${cls}">${safe(p.image||(!p.detailAudit&&p.imageUrl))?`<img loading="lazy" src="${h(p.image||p.imageUrl)}" alt="${h(p.name)}">`:''}</div>`;
-  const productLink=(p,label=p.sku,cls='sku')=>`<a class="${cls}" href="#product=${encodeURIComponent(p.sku)}">${h(label)}</a>`;
+  const productLink=(p,label=p.sku,cls='sku')=>`<a class="${cls}" href="#product=${encodeURIComponent(p.sku)}">${productLabel(p,label)}</a>`;
   const storeOffer=a=>a.type==='商品页 Also Add 加购项'&&!a.documentedAsAccessorySource;
   const title=(name,desc)=>`<div class="page-title"><h1>${h(name)}</h1><p>${h(desc)}</p></div>`;
   const table=(heads,rows)=>`<div class="table-scroll"><table><thead><tr>${heads.map(x=>`<th>${h(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c||''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -56,7 +57,21 @@
     if(!response.ok){const err=new Error(result.message||result.error||response.statusText);err.code=result.code||result.error;err.status=response.status;throw err;}
     return result;
   }
-  function rebuild(){db=mergeProductData(base,profile.overrides);search=createSearch(db,lang,p=>connected?window.Workbench.isEligible(p):Boolean(p.custom||p.customConfirmed),base);}
+  let indexedBase, indexedProfile='', indexedLanguage='';
+  let directoryText=new Map();
+  function rebuild(){
+    const internalVersion=profile.internalSummary?.version;
+    const signature=JSON.stringify([profile.overrides||{},internalVersion?[internalVersion,profile.internalSummary.matched,profile.internalSummary.unmatched]:profile.internalProducts||{}]);
+    if(indexedBase!==base||indexedProfile!==signature){
+      db=mergeProductData(base,profile.overrides,profile.internalProducts);
+      indexedBase=base;indexedProfile=signature;directoryText=new Map();search=null;
+    }
+    if(!search||indexedLanguage!==lang){
+      search=createSearch(db,lang,p=>connected?window.Workbench.isEligible(p):Boolean(p.custom||p.customConfirmed),base);
+      indexedLanguage=lang;
+    }
+    optionCache=null;
+  }
   async function reloadData(reloadBase=false){
     if(reloadBase){
       const resp=await fetch('data/catalog.js',{cache:'no-store'});
@@ -126,12 +141,14 @@
     return `<section class="panel selected"><div class="card-top"><div class="section-label"><i></i>${h(description)}</div>${connected&&window.Workbench?window.Workbench.productActions(p.sku):''}</div>
       ${p.url?`<div class="product-url">${link(p.url,p.url)}</div>`:''}
       <div class="hero-product">${photo(p,'hero-photo')}<div><div class="eyeline">${h(p.groups[0]||p.paths[0]?.[0]||(p.isLocal?t('本地产品','Local product'):t('海外商城','Global store')))}</div>
-      <h2>${h(short(p))}</h2>${short(p)!==p.name?`<div class="official-name">${h(p.name)}</div>`:''}<div class="item-sku">SKU <b>${h(p.sku)}</b></div><div class="hero-price">${h(price(p))}</div>
+      <h2>${productLabel(p,short(p))}</h2>${short(p)!==p.name?`<div class="official-name">${productLabel(p,p.name,false)}</div>`:''}<div class="item-sku">SKU <b>${productLabel(p,p.sku,false)}</b></div><div class="hero-price">${h(price(p))}</div>
       ${p.updated?`<span class="date">${t('商城快照','Store snapshot')} · ${h(p.updated)}</span>`:''}
       ${p.stockStatus&&p.storePageStatus!=='not_found'?`<span class="date"> · ${h(({IN_STOCK:t('官网有货','In stock'),OUT_OF_STOCK:t('官网无货','Out of stock')})[p.stockStatus]||p.stockStatus)}</span>`:''}
       ${p.storeLifecycle?`<span class="date"> · ${t('官网生命周期','Store lifecycle')} ${h(p.storeLifecycle)} ${p.lifecycleSource?link(p.lifecycleSource,t('来源 ↗','Source ↗')):''}</span>`:''}
       ${p.catalogStatus==='retained_previous'?`<span class="date"> · ${t('保留的历史 SKU','Retained from an earlier catalogue')}</span>`:''}</div></div>
       ${/^(?:eol|end[ -]of[ -]life|discontinued)$/i.test(p.storeLifecycle||'')?`<p class="warn">${t('官网将这款产品标为停产。报价前请核实剩余库存或替代型号。','The store marks this product as end of life. Confirm remaining stock or a replacement before quoting.')}</p>`:''}
+      ${window.InternalUI?.product(p,lang,'summary')||''}
+      ${p.isInternal?`<p class="caption">${t('此 SKU 仅见于本机内部资料，商城商品身份尚未确认。','This SKU appears in local internal documents. Its store identity is unconfirmed.')}</p>`:''}
       ${p.catalogStatus==='live_secondary'?`<p class="warn">${p.storePageStatus==='not_found'?t('站点地图留档。商城路由仍返回该 SKU，商品页本轮返回 HTTP 404，价格与供货需另行确认。','Sitemap record. The store routing service still returns this SKU, but the product page returned HTTP 404 in this review. Confirm price and availability separately.'):t('该 SKU 来自官网站点地图和商品路由，未出现在公开搜索目录中。报价前请确认供货状态。','This SKU was found in the official sitemap and routing data and is absent from public product search. Confirm availability before quoting.')} ${link(db.audit?.sources?.sitemap,t('官网站点地图 ↗','Official sitemap ↗'))}</p>`:''}
       ${/^DETAIL_.*(?:SKU|ID).*VERIF/i.test(p.detailAudit?.error||'')?`<p class="warn">${t('本次打开该网址时，未能确认页面对应此 SKU。请按 SKU 核对目录记录与所引手册。','This product page could not be verified as the same SKU. Check the SKU in the catalogue record and the cited documentation.')} ${landingEvidence(p)}</p>`:''}
       ${terms.length?`<div class="tokens">${terms.map(s=>`<span>${h(s)}</span>`).join('')}</div>`:''}
@@ -170,7 +187,7 @@
   const numberOfRows=(tables,text)=>(tables||[]).reduce((count,table)=>count+table.rows.length,0)+(text?.length||0);
   const specCount=p=>numberOfRows(p.specTables,p.specText)+numberOfRows(p.referenceSections?.certification_info_tech?.tables,p.referenceSections?.certification_info_tech?.text);
   const canonicalTab=tab=>tab==='attributes'?'specs':tab==='notes'?'accessories':tab;
-  const defaultTab=p=>p.attributes?.length||p.modelSpecs?.length||!p.parts?.length&&specCount(p)?'specs':'parts';
+  const defaultTab=p=>p.isInternal?'docs':p.attributes?.length||p.modelSpecs?.length||!p.parts?.length&&specCount(p)?'specs':'parts';
   const tabs=p=>({specs:t('技术规格','Specifications'),parts:t('箱内清单','In the box'),accessories:t('配件与定制','Accessories & customization'),...(p.unclassifiedRows?.length?{raw:t('原表待核','Rows to review')}:{}),docs:t('文档与来源','Documents & sources')});
   function storeSpecifications(p){
     const statuses={empty:t('已查阅该 SKU 的 Specification 栏，官网未列正文。','The checked Specification section contains no text.'),image:t('原站以图像或嵌入内容展示规格，可打开原文查看。','The store presents specifications as images or embedded content. Open the source to inspect them.'),unparsed:t('已读取该栏目，原文格式需要复核。','The section was retrieved. Its source format needs review.')};
@@ -249,6 +266,7 @@
     if(!q)return groups;
     return groups.filter(g=>catalogTextMatches(q,g.match?.product?.name,g.match?.product?.sku,
       ...g.items.flatMap(a=>[a.name,a.storeName,a.sku,a.publishedSku,a.type,optionType(a),a.note,local(a.note),a.scope,
+        ...(bazaarAccessoryCheck(a)?.candidates||[]).flatMap(c=>[c.name,c.sku]),
         ...(a.compatibilityDetails||[]).flatMap(c=>[c.interface,c.voltage,c.makeCode])]),
       ...g.notes.flatMap(n=>[n.kind,n.text,local(n.kind),local(n.text)]),...g.services.flatMap(s=>[s.kind,s.text])));
   }
@@ -277,6 +295,25 @@
         add(details,h([d.interface,d.voltage,d.makeCode?'MakeCode · '+d.makeCode:'',d.sheet&&d.row?d.sheet+' · '+t('第 '+d.row+' 行','Row '+d.row):''].filter(Boolean).join(' · ')));
         cite(d.source);
       }
+      const check=bazaarAccessoryCheck(a);
+      if(check){
+        const labels={confirmed:t('商城已核对商品身份','Store identity verified'),candidates:t('商城候选，型号与兼容性待核','Store candidates; verify model and compatibility'),
+          not_found:t('商城检索未返回对应商品','No item returned by the store search'),
+          no_title_match:t('已读取的商城结果中未找到对应型号','No matching title in the inspected store results'),
+          needs_specification:t('需补充规格后确认商品','Specifications required to identify an item'),
+          source_error:t('商城核查读取失败，保留原记录','Store check failed; original record retained'),
+          excluded:t('商城抓取规则限制，保留原记录','Store rules restricted this check'),
+          rate_limited:t('商城限速，本次核查待续跑','Store rate limit; check pending')};
+        add(details,h([labels[check.status]||t('商城核查待完成','Store check pending'),(check.checkedAt||'').slice(0,10)].filter(Boolean).join(' · ')));
+        const candidateCheck=check.status==='candidates'?check:check.lastSuccessful?.status==='candidates'?check.lastSuccessful:null;
+        if(candidateCheck){
+          for(const candidate of candidateCheck.candidates||[]){
+            if(/^https:\/\/www\.seeedstudio\.com\/[^\s]*\.html$/i.test(candidate.url||'')){
+              add(details,link(candidate.url,candidate.name+' · SKU '+candidate.sku+' ↗'));
+            }
+          }
+        }
+      }
     }
     for(const n of g.notes){
       const note=local(n.text);
@@ -295,9 +332,9 @@
       }else if(match.method!=='sku'&&match.source!==target?.url)cite(match.source,t('型号核对','Model evidence'));
       if(match.skuSource!==target?.url)cite(match.skuSource,t('商城 SKU 依据','Store SKU evidence'));
     }
-    const titles=[...names].map((value,index)=>index?'<small>'+h(value)+'</small>':'<b>'+h(value)+'</b>').join('');
+    const titles=[...names].map((value,index)=>{const text=target?productLabel(target,value,false):h(value);return index?'<small>'+text+'</small>':'<b>'+text+'</b>';}).join('');
     const published=first?.publishedSku||first?.sku;
-    const identifier=target?productLink(target):h(published)+(published?`<small>${t('来源编号，尚无可核的商城商品','Source identifier; no confirmed store product')}</small>`:'');
+    const identifier=target?(target.isExternal?h(target.sku):productLink(target)):h(published)+(published?`<small>${t('来源编号，尚无可核的商城商品','Source identifier; no confirmed store product')}</small>`:'');
     const sourceLink=(url,labels)=>link(url,[...labels].join(' · ')+' ↗');
     let store='';
     if(target?.url){
@@ -314,7 +351,7 @@
     return `<div class="list-tools"><input id="accfilter" aria-label="${t('筛选配件与定制','Filter accessories and customization')}" placeholder="${t('名称、接口、频段、定制或 SKU','Name, interface, band, service or SKU')}" value="${h(state.accFilter)}"><span>${groups.length} ${t('个匹配项','matches')}</span></div>`+
       documentConflicts(p)+(other.length?list(other):'')+
       (offers.length?`<details class="summary" data-nav-disclosure="offers" data-offer-sku="${h(p.sku)}"${offersExpanded(p.sku)?' open':''}><summary>${t('商品页同时推荐加购','Also Add offers from the store')} · ${num(offers.length)}</summary><p class="caption">${t('商城在同一商品页推荐加购。选型时请另行核实兼容条件。','The store suggested these items on the same page. Check compatibility for the intended configuration.')}</p>${list(offers)}</details>`:'')+
-      (!groups.length?`<p class="record-empty">${empty} ${state.accFilter?'':evidenceLink(p.url)}</p>`:'');
+      (!groups.length?`<p class="record-empty">${empty} ${state.accFilter?'':evidenceLink(p.url)}</p>`:'')+(window.InternalUI?.product(p,lang,'options')||'');
   }
   function information(p){
     const counts={specs:specCount(p)+(p.attributes?.length||p.modelSpecs?.length||0),parts:p.parts.length,raw:p.unclassifiedRows?.length,accessories:productOptions(p).length,docs:new Set([...p.docs.map(d=>d.url),...(p.wikiLinks||[]).map(d=>d.url),...(p.wikiEvidence||[]).map(d=>d.url)]).size};
@@ -323,7 +360,7 @@
   }
   function tabBody(p){
     const active=state.tab||defaultTab(p);
-    if(active==='specs')return modelDetails(p)+storeSpecifications(p);
+    if(active==='specs')return modelDetails(p)+storeSpecifications(p)+(window.InternalUI?.product(p,lang,'specs')||'');
     if(active==='raw'){
       return `<p class="caption">${t('官网栏目包含下列原文，尚待确认它们是随附物料、规格还是其他说明。','These original store rows require review before they can be classified as included items, specifications or other information.')} ${evidenceLink(p.unclassifiedSource||p.url)}</p>`+
         table([t('官网原文','Original store text')],(p.unclassifiedRows||[]).map(row=>[h(Array.isArray(row)?row.join(' · '):row)]));
@@ -401,7 +438,7 @@
       return [h(c.title||c.url),status,checked+worksheets+pending];
     });
     const supplemental=referenceSections(p,['certification_info','certification_info_eccn','faq_list']);
-    return checked+documentConflicts(p)+table([t('文档或来源','Document or source'),t('打开','Open')],rows)+productReview(p)+(sources.length?`<details class="summary"><summary>${t('查看各来源的核对结果','Review status for each source')}</summary>${table([t('资料','Source'),t('本轮检查','Review status'),t('原文','Original')],sources)}</details>`:'')+(supplemental?`<details class="summary"><summary>${t('官网其他详情栏目','Additional store sections')}</summary>${supplemental}</details>`:'');
+    return (window.InternalUI?.product(p,lang,'all')||'')+checked+documentConflicts(p)+table([t('文档或来源','Document or source'),t('打开','Open')],rows)+productReview(p)+(sources.length?`<details class="summary"><summary>${t('查看各来源的核对结果','Review status for each source')}</summary>${table([t('资料','Source'),t('本轮检查','Review status'),t('原文','Original')],sources)}</details>`:'')+(supplemental?`<details class="summary"><summary>${t('官网其他详情栏目','Additional store sections')}</summary>${supplemental}</details>`:'');
   }
   function documentConflicts(p,packingOnly=false){
     const entries=(p.documentConflicts||[]).filter(c=>!packingOnly||c.field!=='fieldOfView');
@@ -460,14 +497,19 @@
     return `<details class="summary"><summary>${t('本轮商品资料核对','Review of this product')}</summary><p class="caption">${h(explain[a.state]||'')} ${h((a.checkedAt||a.bodyCheckedAt||'').slice(0,10))}</p>${exception}${table([t('来源栏目','Source section'),t('状态','Status')],data)}</details>`;
   }
   function renderAssistant(){
-    const result=search.lookup(state.query),p=state.pin?search.bySku.get(state.pin.toLowerCase()):result.primary;
+    const result=search.lookup(state.query,{ranked:false}),p=state.pin?search.bySku.get(state.pin.toLowerCase()):result.primary;
     currentProduct=p;currentAlternatives=p?search.alternatives(p,state.query,result.needs):[];
     view.innerHTML=title(t('选型查询','Product finder'),t('从客户指定的产品开始，也可以按应用需求查找。','Start with a named product or search by application requirements.'))+queryForm()+
       (p?`<div class="results"><div class="primary-stack">${mainCard(p,result)}${facts(p)}</div><div class="right-stack">${related(p,currentAlternatives)}</div></div>${information(p)}`:`<div class="empty">${t('没有匹配的产品。可尝试型号、SKU 或具体接口需求。','No matching product. Try a model, SKU or interface requirement.')}</div>`);
   }
   function renderCatalog(){
     let items=db.products.filter(p=>state.group==='*'||(state.group==='menu'?p.groups.length:state.group==='outside'?!p.groups.length:p.groups.includes(state.group)));
-    const term=state.catalogQuery.trim();if(term)items=items.filter(p=>catalogTextMatches(term,p.name,p.sku,p.summary,...p.groups,...p.paths.flat()));
+    for(const p of items)if(!directoryText.has(p.sku))directoryText.set(p.sku,normalizeCatalogText([p.name,p.sku,p.summary,...(p.internal?.names||[]),...p.groups,...p.paths.flat()].join(' ')));
+    const term=state.catalogQuery.trim();
+    if(term){
+      const matches=catalogQueryMatcher(term);
+      items=items.filter(p=>matches(directoryText.get(p.sku)));
+    }
     const pages=Math.max(1,Math.ceil(items.length/25));state.page=Math.min(state.page,pages);
     const pageItems=items.slice((state.page-1)*25,state.page*25);
     catalogPage={skus:pageItems.slice(0,12).map(p=>p.sku),total:items.length};
@@ -814,6 +856,7 @@
       }
       catch{connected=false;}
     }
+    if(connected)window.InternalUI?.init({api,language:()=>lang,getState:()=>profile,getProduct:sku=>search?.bySku.get(String(sku).toLowerCase()),reloadData,openProduct});
     if(connected)window.Workbench.init({api,lang:()=>lang,getDb:()=>db,getState:()=>profile,getProduct:sku=>search?.bySku.get(String(sku).toLowerCase()),
       view,sidebar:el('sidebar-favorites'),openProduct,changeView,reloadData,onLanguage:snapLang,renderApp:render,onContextChange:syncChat,onNavigationChange:recordNavigation});
     rebuild();

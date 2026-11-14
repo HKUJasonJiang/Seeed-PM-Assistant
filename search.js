@@ -12,13 +12,22 @@ function normalizeCatalogText(value) {
     .replace(/\s+/g,' ').trim();
 }
 
-function catalogTextMatches(query,...values) {
+function catalogQueryMatcher(query) {
   const words=normalizeCatalogText(query).match(/power adapter|[a-z0-9]+(?:[.-][a-z0-9]+)*|[\p{Script=Han}]+/gu)||[];
-  if(!words.length)return !String(query??'').trim();
-  const haystack=normalizeCatalogText(values.flat(Infinity).join(' '));
-  return words.every(word=>/^(?:[a-z]{0,3}\d{6,})$/.test(word)
-    ?new RegExp('(?:^|[^a-z0-9])'+word+'(?:$|[^a-z0-9])').test(haystack)
-    :haystack.includes(word));
+  if(!words.length)return ()=>!String(query??'').trim();
+  const tests=words.map(word=>/^(?:[a-z]{0,3}\d{6,})$/.test(word)
+    ?new RegExp('(?:^|[^a-z0-9])'+word+'(?:$|[^a-z0-9])'):word);
+  return normalized=>tests.every(test=>typeof test==='string'?normalized.includes(test):test.test(normalized));
+}
+
+function catalogTextMatches(query,...values) {
+  return catalogQueryMatcher(query)(normalizeCatalogText(values.flat(Infinity).join(' ')));
+}
+
+function bazaarAccessoryCheck(accessory) {
+  if(accessory.bazaarCheck)return accessory.bazaarCheck;
+  const key=JSON.stringify([accessory.name||'',accessory.sku||accessory.publishedSku||'']);
+  return globalThis.SEEED_ACCESSORY_LOOKUP?.rows?.[key]||null;
 }
 
 function accessoryResolver(catalog,bySku) {
@@ -49,16 +58,22 @@ function accessoryResolver(catalog,bySku) {
   function eligible(p) {
     return Boolean(p&&storePath(p.url)&&(!p.storePageStatus||p.storePageStatus==='verified'));
   }
-  for(const p of catalog.products){
-    if(!storePath(p.url))continue;
-    // Even a dated listing with the same URL/name must block ambiguous matches.
-    add(urls,storePath(p.url),{product:p,method:'url',source:p.url});
-    add(names,key(p.name),{product:p,method:'name',source:p.url});
-  }
-  for(const host of catalog.products)for(const a of host.accessories||[]){
-    const target=bySku.get(String(a.sku||'').toLowerCase()),source=sourceFor(a);
-    if(target&&officialSource(source)&&/(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}/i.test(a.name))
-      add(names,key(a.name),{product:target,method:'document-name',source});
+  let indexed=false;
+  function indexNames(){
+    if(indexed)return;
+    indexed=true;
+    for(const p of catalog.products){
+      const route=storePath(p.url);
+      if(!route)continue;
+      // Even a dated listing with the same URL/name must block ambiguous matches.
+      add(urls,route,{product:p,method:'url',source:p.url});
+      add(names,key(p.name),{product:p,method:'name',source:p.url});
+    }
+    for(const host of catalog.products)for(const a of host.accessories||[]){
+      const target=bySku.get(String(a.sku||'').toLowerCase()),source=sourceFor(a);
+      if(target&&officialSource(source)&&/(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}/i.test(a.name))
+        add(names,key(a.name),{product:target,method:'document-name',source});
+    }
   }
   const successorSource='https://cdn.soselectronic.com/productdata/cc/5e/c994a4ec/ec21euxga-128-sgns.pdf#page=1';
   const successorSkuSource='https://files.seeedstudio.com/wiki/reComputer-R1000/reComputer-R1100/reComputer-R1100-flyer.pdf#page=3';
@@ -66,17 +81,25 @@ function accessoryResolver(catalog,bySku) {
     if(!a)return null;
     const id=String(a.sku||a.publishedSku||'').trim().toLowerCase();
     const source=sourceFor(a);
+    const checked=bazaarAccessoryCheck(a);
+    const confirmed=checked?.status==='confirmed'?checked.match:checked?.lastSuccessful?.status==='confirmed'?checked.lastSuccessful.match:null;
+    const bazaar=confirmed&&storePath(confirmed.url)&&(!id||String(confirmed.sku).toLowerCase()===id)
+      ?{product:bySku.get(String(confirmed.sku).toLowerCase())||{...confirmed,isExternal:true},
+        method:'bazaar',source:confirmed.url,checkedAt:checked.checkedAt}:null;
     if(id){
       const product=bySku.get(id);
       if(a.publishedSku&&String(a.publishedSku).trim().toLowerCase()!==id)return null;
-      if(a.productUrl&&storePath(a.productUrl)!==storePath(product?.url))return null;
-      return product?{product,method:'sku',source:source||product.url}:null;
+      if(a.productUrl&&storePath(a.productUrl)!==storePath(product?.url||bazaar?.product.url))return null;
+      return product?{product,method:'sku',source:source||product.url}:bazaar;
     }
     if(a.productUrl){
+      indexNames();
       const identified=urls.get(storePath(a.productUrl));
-      return eligible(identified?.product)?identified:null;
+      return eligible(identified?.product)?identified:bazaar&&storePath(a.productUrl)===storePath(bazaar.product.url)?bazaar:null;
     }
     if(!officialSource(source))return null;
+    if(bazaar)return bazaar;
+    indexNames();
     const name=key(a.name);
     if(/^ec25euxga-minipcie(?: 4g module| module \(gps \/ 4g\)| module)?$/.test(name)){
       const product=bySku.get('113991135');
@@ -103,16 +126,27 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   const pick=(zh,eng)=>en?eng:zh;
   const products = catalog.products;
   const bySku = new Map(products.map(p => [p.sku.toLowerCase(), p]));
+  const internalNames=new Map();
+  for(const p of products)for(const value of p.internal?.names||[]){
+    const name=normalizeCatalogText(value);if(!name)continue;
+    if(!internalNames.has(name))internalNames.set(name,p);
+    else if(internalNames.get(name)!==p)internalNames.set(name,null);
+  }
   const officialSkus=officialCatalog===catalog?bySku:new Map(officialCatalog.products.map(p=>[p.sku.toLowerCase(),p]));
   const accessoryMatch=accessoryResolver(officialCatalog,officialSkus);
   const modelQueries=new Map();
-  for(const host of officialCatalog.products)for(const row of host.accessories||[]){
-    if(row.sku||row.publishedSku)continue;
-    const result=accessoryMatch(row);
-    if(!result)continue;
-    const full=normalizeCatalogText(row.name);
-    modelQueries.set(full,result);
-    if(result.method==='successor')modelQueries.set(normalizeCatalogText(row.name.split(/\s+/)[0]),result);
+  let aliasesIndexed=false;
+  function indexAliases(){
+    if(aliasesIndexed)return;
+    aliasesIndexed=true;
+    for(const host of officialCatalog.products)for(const row of host.accessories||[]){
+      if(row.sku||row.publishedSku)continue;
+      const result=accessoryMatch(row);
+      if(!result)continue;
+      const full=normalizeCatalogText(row.name);
+      modelQueries.set(full,result);
+      if(result.method==='successor')modelQueries.set(normalizeCatalogText(row.name.split(/\s+/)[0]),result);
+    }
   }
   const lower = text => String(text??'').normalize('NFKC').toLowerCase().replace(/[‐‑‒–—−]/g, '-');
   const traits = [
@@ -140,7 +174,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   const englishLabels={super:'Super mode',ether:'dual Ethernet',custom:'customization',gateway:'gateway',jetson:'Jetson edge inference',pi:'Raspberry Pi',fanless:'fanless',edge:'edge computing',din:'DIN rail',sensor:'sensors',temp:'temperature',camera:'camera',display:'display',micro:'development board',robot:'robotics'};
   if(en)for(const t of traits)t.label=englishLabels[t.key]||t.label;
   const titles=new Map(products.map(p=>[p.sku,normalizeCatalogText(p.name)]));
-  const searchable=new Map(products.map(p=>[p.sku,normalizeCatalogText([p.name,p.summary,...(p.capabilities||[]),...(p.groups||[]),...(p.attributes||[]).map(a=>a.name+' '+a.value),...(p.modelSpecs||[]).map(a=>a.name+' '+a.value)].join(' '))]));
+  const searchable=new Map(products.map(p=>[p.sku,normalizeCatalogText([p.name,p.summary,...(p.internal?.names||[]),...(p.capabilities||[]),...(p.groups||[]),...(p.attributes||[]).map(a=>a.name+' '+a.value),...(p.modelSpecs||[]).map(a=>a.name+' '+a.value)].join(' '))]));
   function negated(query, t) {
     const clause=query.split(/[，,。;；\n]/).find(c=>t.ask.test(c));
     if(!clause)return false;
@@ -172,6 +206,8 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     const q=lower(query);
     const explicit = q.split(/[^a-z\d_-]+/).map(s=>bySku.get(s)).find(Boolean);
     if (explicit) return explicit;
+    const internalName=internalNames.get(normalizeCatalogText(q));
+    if(internalName)return internalName;
     const gatewayCode=q.match(/\br\d{4}(?:-\d+)?\b/)?.[0];
     const gateway=gatewayCode&&gatewayModels.get(gatewayCode);
     if(gateway)return gateway;
@@ -216,15 +252,17 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     if(p.sku.toLowerCase()===q)points+=1000;
     return points;
   }
-  function lookup(query) {
+  function lookup(query,options={}) {
     const q=lower(query.trim()), standard=normalizeCatalogText(q), needs=intents(standard);
+    const namedProduct=named(q);
+    if(!namedProduct)indexAliases();
     const documentMatch=modelQueries.get(standard);
-    const fixed=named(q)||(documentMatch&&bySku.get(documentMatch.product.sku.toLowerCase()));
+    const fixed=namedProduct||(documentMatch&&bySku.get(documentMatch.product.sku.toLowerCase()));
     // Negative requirements are not positive search keywords for alternative products.
     let positive=standard;
     for(const t of traits)if(negated(standard,t))positive=positive.replace(t.ask,' ');
     if(noAdapter.test(q))positive=positive.replace(/\bpower adapter\b/g,' ');
-    const ranked=products.map(p=>({p,score:score(p,positive.trim(),needs)})).filter(x=>x.score>0)
+    const ranked=options.ranked===false&&fixed?[]:products.filter(p=>!p.internal?.eol||p===fixed).map(p=>({p,score:score(p,positive.trim(),needs)})).filter(x=>x.score>0)
       .sort((a,b)=>Number(a.p.storePageStatus==='not_found')-Number(b.p.storePageStatus==='not_found')||b.score-a.score||Number(Boolean(b.p.series))-Number(Boolean(a.p.series))||a.p.name.localeCompare(b.p.name));
     let selection='';
     if(documentMatch?.method==='successor'&&documentMatch.product.sku===fixed?.sku)
@@ -242,7 +280,7 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
     const words=(lower(primary.name).match(/[a-z0-9-]{3,}/g)||[]).filter(w=>!['with','and','for','the','seeed','studio','module','product','compatible','with'].includes(w));
     const list=[];
     for (const p of products) {
-      if(p.sku===primary.sku)continue;
+      if(p.sku===primary.sku||p.internal?.eol)continue;
       const name=lower(p.name), common=words.filter(w=>name.includes(w));
       const same=primary.groups.filter(c=>p.groups.includes(c));
       if(jetson && !['classic','super','jetson'].includes(p.series))continue;
@@ -272,4 +310,4 @@ function createSearch(catalog,language='zh-CN',isCustom=p=>Boolean(p.custom&&p.c
   }
   return {lookup,alternatives,matches,bySku,matchesText:(text,query)=>catalogTextMatches(query,text),accessoryMatch};
 }
-if(typeof module!=='undefined')Object.assign(module.exports=createSearch,{normalizeCatalogText,catalogTextMatches});
+if(typeof module!=='undefined')Object.assign(module.exports=createSearch,{normalizeCatalogText,catalogTextMatches,catalogQueryMatcher});

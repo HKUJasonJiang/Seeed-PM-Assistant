@@ -19,7 +19,7 @@ from .preview_migration import recover_preview
 from .storage import Problem, ROOT, Store, packed
 from .updates import Updates
 
-ASSETS={"index.html","app.css","app.js","search.js","product-ui.js","workbench.js","workbench.css","chat.js","chat.css","locale.js","data/catalog.js"}
+ASSETS={"index.html","app.css","app.js","search.js","product-ui.js","workbench.js","workbench.css","chat.js","chat.css","locale.js","internal-ui.js","internal-ui.css","data/catalog.js","data/accessory-lookup.js"}
 
 
 class Instance:
@@ -114,12 +114,34 @@ class Handler(BaseHTTPRequestHandler):
                 elif chat and chat[2]=="send":result=self.server.chats.send(chat[1],body)
                 elif chat and chat[2]=="delete":result=self.server.chats.delete(chat[1])
                 elif path=="/api/update": result=self.server.updates.start(body)
+                elif path=="/api/internal":
+                    if body.get("action")!="import":raise Problem("INVALID_INTERNAL_ACTION")
+                    from .storage import field
+                    with self.server.store.lock:
+                        self.server.store.internal.load(field(body.get("path"),2048,True))
+                        self.server.store.internal.apply(self.server.store.catalog)
+                        result=self.server.store.internal.public()
+                elif path=="/api/internal/assess":
+                    from .storage import field, strings
+                    with self.server.store.lock:
+                        self.server.store.internal.load()
+                        self.server.store.internal.apply(self.server.store.catalog)
+                        result={"assessments":self.server.store.internal.assess(
+                            strings(body.get("skus",[]),30),field(body.get("description",""),12000),body.get("language"),
+                            body.get("materials",[]) if isinstance(body.get("materials",[]),list) else [])}
                 elif path in {"/api/settings","/api/product","/api/project","/api/favorite"}:
                     result=self.server.store.apply(path.split("/")[-1],body)
                 else:raise Problem("UNKNOWN_ROUTE",404)
                 self.reply(result)
             elif path=="/api/health": self.reply({"app":"seeed-workbench","version":2})
             elif path=="/api/state": self.reply(self.server.store.public())
+            elif path=="/api/internal":
+                with self.server.store.lock:
+                    self.server.store.internal.load()
+                    self.server.store.internal.apply(self.server.store.catalog)
+                    self.reply(self.server.store.internal.public())
+            elif re.fullmatch(r"/api/internal/source/[a-f0-9]{24}",path):
+                self.reply(self.server.store.internal.source(path.rsplit("/",1)[1]))
             elif path=="/api/chats":self.reply(self.server.chats.list())
             elif chat and not chat[2]:self.reply(self.server.chats.read(chat[1]))
             elif path=="/api/update": self.reply(self.server.updates.status())

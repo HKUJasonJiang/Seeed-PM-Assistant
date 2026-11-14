@@ -1,0 +1,5 @@
+应用文件不完整。请先关闭压缩包预览，在 ZIP 上右键选择“全部解压”，再从解压后同时包含 index.html、data 和 tools 的文件夹打开启动助手.cmd。
+如果公司安全软件隔离了文件，请让 IT 核查被隔离的文件和设备策略。
+
+The application files are incomplete. Right-click the ZIP, choose Extract All, then run Start Assistant.cmd beside index.html, data and tools.
+If company security software quarantined files, ask IT to review the affected files and device policy.

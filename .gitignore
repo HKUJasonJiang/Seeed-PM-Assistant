@@ -2,6 +2,8 @@
 .local-workbench*/
 user-images/
 workbench.json
+internal-knowledge.json
+startup-diagnostic.txt
 update-state.json
 service.lock
 *.sqlite

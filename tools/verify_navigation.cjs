@@ -10,7 +10,7 @@ const origin='http://127.0.0.1:58743/';
 const primary='100025879', other='100011197';
 const before='[data-history="-1"]', after='[data-history="1"]';
 const preference='seeed-workbench.favorites-sidebar.expanded';
-const assets=new Set(['index.html','app.css','app.js','search.js','product-ui.js','workbench.js','workbench.css','chat.js','chat.css','data/catalog.js']);
+const assets=new Set(['index.html','app.css','app.js','search.js','product-ui.js','internal-ui.js','internal-ui.css','workbench.js','workbench.css','chat.js','chat.css','data/catalog.js']);
 const data=fs.readFileSync(path.join(root,'data/catalog.js'));
 
 async function localBrowser(browser,language='zh-CN',width=1320){

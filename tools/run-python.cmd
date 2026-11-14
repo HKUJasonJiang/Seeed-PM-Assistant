@@ -49,9 +49,11 @@ exit /b %errorlevel%
 py -3 -I -B %*
 exit /b %errorlevel%
 :missing
+>startup-diagnostic.txt echo [PYTHON_NOT_FOUND] No supported 64-bit CPython 3.12 or 3.13 was detected.
 set "seeed_previous_cp="
 for /f "tokens=2 delims=:" %%p in ('chcp 2^>nul') do set "seeed_previous_cp=%%p"
 chcp 65001 >nul 2>nul
 type "%~dp0python-help.txt"
+type "%~dp0python-help.txt" >>startup-diagnostic.txt
 if defined seeed_previous_cp chcp %seeed_previous_cp% >nul 2>nul
 exit /b 1
